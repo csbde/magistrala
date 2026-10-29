@@ -4,9 +4,7 @@
 name: Check the consistency of generated files
 
 on:
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   check-generated-files:
