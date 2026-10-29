@@ -1,0 +1,77 @@
+# Copyright (c) Abstract Machines
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release Single Binary
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Single Binary
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            binary_name: magistrala-server-linux-amd64
+          - goos: linux
+            goarch: arm64
+            binary_name: magistrala-server-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            binary_name: magistrala-server-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            binary_name: magistrala-server-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            binary_name: magistrala-server-windows-amd64.exe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build Frontend UI
+        run: |
+          cd ui
+          npm ci
+          npm run build
+          mkdir -p ../cmd/server/dist
+          cp -r dist/* ../cmd/server/dist/
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build Embedded Single Binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p build
+          go build -ldflags "-s -w -X 'main.Version=${{ github.ref_name }}'" -o build/${{ matrix.binary_name }} cmd/server/main.go
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/${{ matrix.binary_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
