@@ -425,3 +425,14 @@ run_addons: check_certs docker/.env.tokens
 
 run_live: check_certs docker/.env.tokens
 	GOPATH=$(go env GOPATH) $(DOCKER_PLATFORM) docker compose -f docker/docker-compose.yaml -f docker/docker-compose-live.yaml $(DOCKER_ENV_FILES) -p $(DOCKER_PROJECT) $(DOCKER_COMPOSE_COMMAND) $(args)
+
+# Target to build embedded UI and single binary server
+.PHONY: build_ui build_server
+build_ui:
+	cd ui && npm install && npm run build
+	mkdir -p cmd/server/dist
+	cp -r ui/dist/* cmd/server/dist/
+
+build_server: build_ui
+	mkdir -p $(BUILD_DIR)
+	go build -ldflags "-s -w" -o $(BUILD_DIR)/magistrala-server cmd/server/main.go
