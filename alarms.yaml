@@ -1,0 +1,520 @@
+# Copyright (c) Abstract Machines
+# SPDX-License-Identifier: Apache-2.0
+
+openapi: 3.0.1
+info:
+  title: Magistrala Alarms API
+  description: HTTP API for viewing and managing rule-generated alarms.
+  contact:
+    email: info@absmach.eu
+  license:
+    name: Apache 2.0
+    url: https://github.com/absmach/magistrala/blob/main/LICENSE
+  version: 0.18.5
+
+servers:
+  - url: http://localhost:8050
+  - url: https://localhost:8050
+
+tags:
+  - name: alarms
+    description: Alarm retrieval and lifecycle operations
+  - name: health
+    description: Service health
+
+paths:
+  /{workspaceID}/alarms:
+    get:
+      operationId: listAlarms
+      summary: List alarms
+      tags: [alarms]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Dir'
+        - $ref: '#/components/parameters/ChannelID'
+        - $ref: '#/components/parameters/DeviceID'
+        - $ref: '#/components/parameters/Subtopic'
+        - $ref: '#/components/parameters/RuleID'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/AssigneeID'
+        - $ref: '#/components/parameters/Severity'
+        - $ref: '#/components/parameters/UpdatedBy'
+        - $ref: '#/components/parameters/AssignedBy'
+        - $ref: '#/components/parameters/AcknowledgedBy'
+        - $ref: '#/components/parameters/ResolvedBy'
+        - $ref: '#/components/parameters/CreatedFrom'
+        - $ref: '#/components/parameters/CreatedTo'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AlarmList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /{workspaceID}/alarms/{alarmID}:
+    get:
+      operationId: viewAlarm
+      summary: View an alarm
+      tags: [alarms]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/AlarmID'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AlarmResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateAlarm
+      summary: Partially update an alarm
+      description: |
+        Updates only fields present in the request. Explicit zero values are
+        retained: `status: active`, `severity: 0`, an empty assignee, and an
+        empty metadata object are updates rather than omissions.
+      tags: [alarms]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/AlarmID'
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: '#/components/requestBodies/AlarmUpdate'
+      responses:
+        '200':
+          $ref: '#/components/responses/AlarmResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteAlarm
+      summary: Delete an alarm
+      tags: [alarms]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/AlarmID'
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Alarm deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      operationId: alarmsHealth
+      summary: Get service health
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/HealthResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  schemas:
+    Alarm:
+      type: object
+      required:
+        - id
+        - rule_id
+        - workspace_id
+        - channel_id
+        - device_id
+        - subtopic
+        - status
+        - measurement
+        - value
+        - unit
+        - threshold
+        - cause
+        - severity
+        - assignee_id
+        - created_at
+        - updated_at
+        - updated_by
+      properties:
+        id:
+          type: string
+          readOnly: true
+        rule_id:
+          type: string
+          readOnly: true
+        workspace_id:
+          type: string
+          readOnly: true
+        channel_id:
+          type: string
+          readOnly: true
+        device_id:
+          type: string
+          readOnly: true
+        subtopic:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/AlarmStatus'
+        measurement:
+          type: string
+          readOnly: true
+        value:
+          type: string
+          readOnly: true
+        unit:
+          type: string
+          readOnly: true
+        threshold:
+          type: string
+          readOnly: true
+        cause:
+          type: string
+          readOnly: true
+        severity:
+          type: integer
+          minimum: 0
+          maximum: 100
+        assignee_id:
+          type: string
+          description: Empty when the alarm is unassigned.
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_by:
+          type: string
+          readOnly: true
+        assigned_at:
+          type: string
+          format: date-time
+        assigned_by:
+          type: string
+        acknowledged_at:
+          type: string
+          format: date-time
+        acknowledged_by:
+          type: string
+        resolved_at:
+          type: string
+          format: date-time
+        resolved_by:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    AlarmUpdate:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      description: |
+        At least one field must be present. Lifecycle attribution
+        (`assigned_by`/`assigned_at`, `acknowledged_by`/`acknowledged_at`,
+        `resolved_by`/`resolved_at`) is not accepted here: the service records
+        the authenticated caller and the server time whenever `assignee_id`,
+        `acknowledged` or `status` changes.
+      properties:
+        status:
+          allOf:
+            - $ref: '#/components/schemas/AlarmStatus'
+          description: |
+            Setting `cleared` records the caller as the resolver; setting
+            `active` re-opens the alarm and clears the resolver.
+        severity:
+          type: integer
+          minimum: 0
+          maximum: 100
+        assignee_id:
+          type: string
+          description: Send an empty string to clear the assignee.
+        acknowledged:
+          type: boolean
+          description: |
+            `true` records the caller as the acknowledger, `false` clears the
+            acknowledgement.
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+      example:
+        status: active
+        severity: 0
+        assignee_id: ''
+        acknowledged: false
+        metadata: {}
+
+    AlarmStatus:
+      type: string
+      enum: [active, cleared]
+
+    Metadata:
+      type: object
+      additionalProperties: true
+
+    AlarmsPage:
+      type: object
+      required: [total, offset, limit, alarms]
+      properties:
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          format: int64
+          minimum: 0
+        limit:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000
+        alarms:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alarm'
+
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: entity not found
+
+  parameters:
+    WorkspaceID:
+      name: workspaceID
+      in: path
+      required: true
+      schema:
+        type: string
+    AlarmID:
+      name: alarmID
+      in: path
+      required: true
+      schema:
+        type: string
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+        default: 0
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 100
+        default: 10
+    Order:
+      name: order
+      in: query
+      schema:
+        type: string
+        enum: [created_at, updated_at]
+        default: updated_at
+    Dir:
+      name: dir
+      in: query
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: desc
+    ChannelID:
+      name: channel_id
+      in: query
+      schema:
+        type: string
+    DeviceID:
+      name: device_id
+      in: query
+      schema:
+        type: string
+    Subtopic:
+      name: subtopic
+      in: query
+      schema:
+        type: string
+    RuleID:
+      name: rule_id
+      in: query
+      schema:
+        type: string
+    Status:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [active, cleared, all]
+        default: all
+    AssigneeID:
+      name: assignee_id
+      in: query
+      schema:
+        type: string
+    Severity:
+      name: severity
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 100
+    UpdatedBy:
+      name: updated_by
+      in: query
+      schema:
+        type: string
+    AssignedBy:
+      name: assigned_by
+      in: query
+      schema:
+        type: string
+    AcknowledgedBy:
+      name: acknowledged_by
+      in: query
+      schema:
+        type: string
+    ResolvedBy:
+      name: resolved_by
+      in: query
+      schema:
+        type: string
+    CreatedFrom:
+      name: created_from
+      in: query
+      schema:
+        type: string
+        format: date-time
+    CreatedTo:
+      name: created_to
+      in: query
+      schema:
+        type: string
+        format: date-time
+
+  requestBodies:
+    AlarmUpdate:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AlarmUpdate'
+
+  responses:
+    AlarmResponse:
+      description: Alarm returned
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Alarm'
+    AlarmList:
+      description: Paginated alarms returned
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AlarmsPage'
+    BadRequest:
+      description: Invalid path, query parameters, or request body
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid authentication credentials
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The caller is not authorized for this operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Alarm not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnsupportedMediaType:
+      description: Content-Type is missing or is not application/json
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnprocessableEntity:
+      description: The request was valid but could not be processed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalServerError:
+      description: Unexpected server-side error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HealthResponse:
+      description: Service health
+      content:
+        application/health+json:
+          schema:
+            $ref: './schemas/health_info.yaml'
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

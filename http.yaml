@@ -1,0 +1,229 @@
+# Copyright (c) Abstract Machines
+# SPDX-License-Identifier: Apache-2.0
+
+openapi: 3.0.1
+info:
+  title: Magistrala FluxMQ HTTP messaging
+  description: |
+    HTTP API for sending messages through communication channels.
+    Some useful links:
+    - [The Magistrala repository](https://github.com/absmach/magistrala)
+  contact:
+    email: info@absmach.eu
+  license:
+    name: Apache 2.0
+    url: https://github.com/absmach/magistrala/blob/main/LICENSE
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8008
+  - url: https://localhost:8008
+
+tags:
+  - name: messages
+    description: Everything about your Messages
+    externalDocs:
+      description: Find out more about messages
+      url: https://magistrala.absmach.eu/docs/
+
+paths:
+  /m/{workspacePrefix}/c/{channelPrefix}:
+    post:
+      summary: Sends message to the communication channel
+      description: |
+        Sends message to the communication channel. Messages can be sent as
+        JSON formatted SenML or as an opaque binary payload. This native route
+        is served by FluxMQ; Magistrala's Nginx /http/ route forwards it unchanged.
+        A successful response confirms broker publication, not downstream SenML
+        validation, rule execution, or persistence. Malformed JSON can therefore
+        be published successfully and fail later in a configured consumer.
+      tags:
+        - messages
+      parameters:
+        - $ref: "#/components/parameters/workspacePrefix"
+        - $ref: "#/components/parameters/channelPrefix"
+        - name: qos
+          in: query
+          description: Broker delivery quality of service; defaults to 0.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 2
+            default: 0
+        - name: retain
+          in: query
+          description: Whether the broker retains the message; defaults to false.
+          schema:
+            type: boolean
+            default: false
+      requestBody:
+        $ref: "#/components/requestBodies/MessageReq"
+      responses:
+        "200":
+          description: |
+            Broker publication succeeded. The body is {"status":"ok"}.
+            This does not confirm downstream processing or persistence.
+        "400":
+          description: |
+            Request body could not be read (including the configured body-size
+            limit), or the qos or retain query parameter is invalid. This is
+            not a JSON or SenML payload validation response.
+        "401":
+          description: Missing or invalid access token provided.
+        "403":
+          description: Access denied to the requested resource.
+        "404":
+          description: Request path is not a recognized messaging route.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+  /health:
+    get:
+      summary: Retrieves service health check info.
+      tags:
+        - health
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthRes"
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+components:
+  schemas:
+    SenMLRecord:
+      type: object
+      properties:
+        bn:
+          type: string
+          description: Base Name
+        bt:
+          type: number
+          format: double
+          description: Base Time
+        bu:
+          type: number
+          format: double
+          description: Base Unit
+        bv:
+          type: number
+          format: double
+          description: Base Value
+        bs:
+          type: number
+          format: double
+          description: Base Sum
+        bver:
+          type: number
+          format: double
+          description: Version
+        n:
+          type: string
+          description: Name
+        u:
+          type: string
+          description: Unit
+        v:
+          type: number
+          format: double
+          description: Value
+        vs:
+          type: string
+          description: String Value
+        vb:
+          type: boolean
+          description: Boolean Value
+        vd:
+          type: string
+          description: Data Value
+        s:
+          type: number
+          format: double
+          description: Value Sum
+        t:
+          type: number
+          format: double
+          description: Time
+        ut:
+          type: number
+          format: double
+          description: Update Time
+    SenMLArray:
+      type: array
+      items:
+        $ref: "#/components/schemas/SenMLRecord"
+
+  parameters:
+    workspacePrefix:
+      name: workspacePrefix
+      description: ID or route of the workspace associated with the channel and client.
+      in: path
+      schema:
+        type: string
+      example: myworkspace
+      required: true
+    channelPrefix:
+      name: channelPrefix
+      description: ID or route of the channel connected to the client.
+      in: path
+      schema:
+        type: string
+      example: mychannel
+      required: true
+
+  requestBodies:
+    MessageReq:
+      description: |
+        Message to be distributed. Since the platform expects messages to be
+        properly formatted SenML for SenML processing, send valid SenML using
+        application/senml+json when targeting a SenML consumer. The native HTTP
+        route treats the body as opaque bytes and does not require or validate
+        Content-Type. A missing or different Content-Type does not produce 415.
+        Downstream processing depends on the configured rules and consumers,
+        not solely on this header: valid SenML sent as text/plain may still be
+        processed, while malformed JSON may fail downstream after HTTP success.
+      required: true
+      content:
+        application/senml+json:
+          schema:
+            $ref: "#/components/schemas/SenMLArray"
+        application/json:
+          schema:
+            type: string
+            format: binary
+        application/octet-stream:
+          schema:
+            type: string
+            format: binary
+        "*/*":
+          schema:
+            type: string
+            format: binary
+
+  responses:
+    ServiceError:
+      description: Unexpected server-side error occurred.
+
+    HealthRes:
+      description: Service Health Check.
+      content:
+        application/health+json:
+          schema:
+            $ref: "./schemas/health_info.yaml"
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: uuid
+      description: |
+        * Client access: "Authorization: Client <client_key>"
+
+    basicAuth:
+      type: http
+      scheme: basic
+      description: |
+        * Clients access: "Authorization: Basic <base64-encoded_credentials>"
+
+security:
+  - bearerAuth: []
+  - basicAuth: []

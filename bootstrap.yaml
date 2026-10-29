@@ -1,0 +1,1365 @@
+# Copyright (c) Abstract Machines
+# SPDX-License-Identifier: Apache-2.0
+
+openapi: 3.0.1
+info:
+  title: Magistrala Bootstrap service
+  description: |
+    HTTP API for managing platform devices configuration, device profiles,
+    and enrollment bindings.
+    Some useful links:
+    - [The Magistrala repository](https://github.com/absmach/magistrala)
+  contact:
+    email: info@absmach.eu
+  license:
+    name: Apache 2.0
+    url: https://github.com/absmach/magistrala/blob/main/LICENSE
+  version: 0.40.0
+
+servers:
+  - url: http://localhost:9010
+  - url: https://localhost:9010
+
+tags:
+  - name: configs
+    description: Bootstrap enrollment configurations
+    externalDocs:
+      description: Find out more about Configs
+      url: https://magistrala.absmach.eu/docs/
+  - name: profiles
+    description: Device configuration profiles and templates
+  - name: enrollments
+    description: Enrollment profile assignment and resource bindings
+  - name: device-bootstrap
+    description: Per-device challenge-response and encrypted configuration retrieval
+  - name: health
+    description: Service health and observability
+
+paths:
+  # ── Enrollment configs ────────────────────────────────────────────────────
+
+  /{workspaceID}/devices/configs:
+    post:
+      operationId: createConfig
+      summary: Adds a new enrollment config
+      description: |
+        Adds a new bootstrap enrollment config owned by the user identified by
+        the provided access token. When `external_key` is omitted, the service
+        generates a random per-device key and returns its unpadded base64url
+        text in the response. User-supplied keys may be any UTF-8 string with
+        at least 10 characters. Provision the external ID, external key, key
+        version, and Bootstrap URL into the device separately from its
+        downloaded config.
+      tags:
+        - configs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+      requestBody:
+        $ref: "#/components/requestBodies/ConfigCreateReq"
+      responses:
+        "201":
+          $ref: "#/components/responses/ConfigCreateRes"
+        "400":
+          description: Failed due to malformed JSON.
+        "401":
+          description: Missing or invalid access token provided.
+        "403":
+          description: Failed to perform authorization over the entity.
+        "409":
+          description: Failed due to using an existing external ID.
+        "415":
+          description: Missing or invalid content type.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+    get:
+      operationId: getConfigs
+      summary: Retrieves managed configs
+      description: |
+        Retrieves a paginated list of managed enrollment configs.
+      tags:
+        - configs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Status"
+        - $ref: "#/components/parameters/Name"
+        - $ref: "#/components/parameters/ExternalIDQuery"
+        - $ref: "#/components/parameters/ConfigIDQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/ConfigListRes"
+        "400":
+          description: Failed due to malformed query parameters.
+        "401":
+          description: Missing or invalid access token provided.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/configs/{configID}:
+    get:
+      operationId: getConfig
+      summary: Retrieves a config
+      tags:
+        - configs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ConfigRes"
+        "401":
+          description: Missing or invalid access token provided.
+        "403":
+          description: Failed to perform authorization over the entity.
+        "404":
+          description: Config does not exist.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+    patch:
+      operationId: updateConfig
+      summary: Updates config info
+      description: |
+        Updates name and content of an existing enrollment config.
+      tags:
+        - configs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      requestBody:
+        $ref: "#/components/requestBodies/ConfigUpdateReq"
+      responses:
+        "200":
+          description: Config updated.
+        "400":
+          description: Failed due to malformed JSON.
+        "401":
+          description: Missing or invalid access token provided.
+        "403":
+          description: Failed to perform authorization over the entity.
+        "404":
+          description: Config does not exist.
+        "415":
+          description: Missing or invalid content type.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+    delete:
+      operationId: removeConfig
+      summary: Removes a config
+      tags:
+        - configs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      responses:
+        "204":
+          description: Config removed.
+        "401":
+          description: Missing or invalid access token provided.
+        "403":
+          description: Failed to perform authorization over the entity.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/configs/certs/{configID}:
+    patch:
+      operationId: updateConfigCerts
+      summary: Updates client certificates
+      description: |
+        Replaces the certificate fields (client_cert, client_key, ca_cert) of an
+        existing enrollment config.
+      tags:
+        - configs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      requestBody:
+        $ref: "#/components/requestBodies/ConfigCertUpdateReq"
+      responses:
+        "200":
+          $ref: "#/components/responses/ConfigUpdateCertsRes"
+        "400":
+          description: Failed due to malformed JSON.
+        "401":
+          description: Missing or invalid access token provided.
+        "403":
+          description: Failed to perform authorization over the entity.
+        "404":
+          description: Config does not exist.
+        "415":
+          description: Missing or invalid content type.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/configs/{configID}/enable:
+    post:
+      operationId: enableConfig
+      summary: Enables a config
+      description: |
+        Enables the enrollment config, allowing its device to bootstrap.
+        Idempotent — returns the current config without error if already enabled.
+      tags:
+        - configs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ConfigRes"
+        "401":
+          description: Missing or invalid access token provided.
+        "403":
+          description: Failed to perform authorization over the entity.
+        "404":
+          description: Config does not exist.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/configs/{configID}/disable:
+    post:
+      operationId: disableConfig
+      summary: Disables a config
+      description: |
+        Disables the enrollment config, preventing its device from bootstrapping.
+        Idempotent — returns the current config without error if already disabled.
+      tags:
+        - configs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ConfigRes"
+        "401":
+          description: Missing or invalid access token provided.
+        "403":
+          description: Failed to perform authorization over the entity.
+        "404":
+          description: Config does not exist.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  # ── Device bootstrap ──────────────────────────────────────────────────────
+
+  /devices/bootstrap/challenges/{externalID}:
+    post:
+      operationId: issueBootstrapChallenge
+      summary: Issues a device Bootstrap challenge
+      description: |
+        Creates a one-minute, single-use server challenge. The device does not
+        send its Bootstrap key. Unknown and disabled external IDs receive the
+        same response shape.
+      tags:
+        - device-bootstrap
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ExternalID"
+      responses:
+        "200":
+          description: Challenge issued. Do not cache this response.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootstrapChallenge"
+        "400":
+          description: Missing or invalid external ID.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /devices/bootstrap/configurations/{externalID}:
+    post:
+      operationId: retrieveEncryptedBootstrapConfig
+      summary: Authenticates a device and returns its encrypted configuration
+      description: |
+        The device generates a random 32-byte `device_nonce` and proves
+        possession of its enrollment-specific Bootstrap key. Treat the exact
+        external-key UTF-8 bytes as `root_key`; do not base64-decode the key.
+
+        First derive the authentication key with HKDF-SHA256:
+        `HKDF(root_key, salt=external_id,
+        info="magistrala-bootstrap-auth-v1", length=32)`.
+
+        Calculate `proof` as HMAC-SHA256 over the UTF-8 string formed by
+        joining these values with newline (`\n`) characters:
+        `v1`, `external_id`, `challenge_id`, `server_nonce`,
+        `device_nonce`, and decimal `key_version`. The nonce and proof fields
+        use unpadded base64url.
+
+        On success the response is an AES-256-GCM envelope. Derive its key with
+        HKDF-SHA256 using the same root key and external-ID salt but
+        `info="magistrala-bootstrap-response-v1"`. AES-GCM additional
+        authenticated data is the newline-joined UTF-8 string
+        `bootstrap-response-v1`, `external_id`, `challenge_id`,
+        `server_nonce`, `device_nonce`, and decimal `key_version`.
+        Decrypting `ciphertext` returns the Bootstrap response object. Its
+        `content` field is a string and `content_type` tells the device how to
+        parse that string.
+
+        This protocol does not require a device clock. A challenge can be
+        consumed only once and expires one minute after issue.
+      tags:
+        - device-bootstrap
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ExternalID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceBootstrapProof"
+      responses:
+        "200":
+          description: Encrypted rendered Bootstrap configuration.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncryptedBootstrapConfig"
+        "400":
+          description: Malformed proof request.
+        "403":
+          description: |
+            Device authentication failed. The response intentionally does not
+            reveal whether the external ID, challenge, key version, or proof
+            was incorrect.
+        "415":
+          description: Content-Type must be application/json.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  # ── Device profiles ───────────────────────────────────────────────────────
+
+  /{workspaceID}/devices/bootstrap/profiles:
+    post:
+      operationId: createProfile
+      summary: Creates a device profile
+      tags:
+        - profiles
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+      requestBody:
+        $ref: "#/components/requestBodies/ProfileCreateReq"
+      responses:
+        "201":
+          $ref: "#/components/responses/ProfileRes"
+        "400":
+          description: Failed due to malformed JSON.
+        "401":
+          description: Missing or invalid access token provided.
+        "403":
+          description: Failed to perform authorization over the entity.
+        "409":
+          description: A profile with the same name already exists in this workspace.
+        "415":
+          description: Missing or invalid content type.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+    get:
+      operationId: listProfiles
+      summary: Lists device profiles
+      tags:
+        - profiles
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Name"
+      responses:
+        "200":
+          $ref: "#/components/responses/ProfileListRes"
+        "400":
+          description: Failed due to malformed query parameters.
+        "401":
+          description: Missing or invalid access token provided.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/bootstrap/profiles/upload:
+    post:
+      operationId: uploadProfile
+      summary: Uploads a device profile
+      description: |
+        Uploads a profile definition. Accepts JSON, YAML, or TOML payloads
+        depending on the Content-Type header.
+      tags:
+        - profiles
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Profile"
+          application/yaml:
+            schema:
+              $ref: "#/components/schemas/Profile"
+          text/yaml:
+            schema:
+              $ref: "#/components/schemas/Profile"
+          application/toml:
+            schema:
+              $ref: "#/components/schemas/Profile"
+      responses:
+        "201":
+          $ref: "#/components/responses/ProfileRes"
+        "400":
+          description: Failed due to malformed body.
+        "401":
+          description: Missing or invalid access token provided.
+        "415":
+          description: Unsupported content type.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/bootstrap/profiles/{profileID}:
+    get:
+      operationId: getProfile
+      summary: Retrieves a device profile
+      tags:
+        - profiles
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ProfileID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ProfileRes"
+        "401":
+          description: Missing or invalid access token provided.
+        "404":
+          description: Profile does not exist.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+    patch:
+      operationId: updateProfile
+      summary: Updates a device profile
+      tags:
+        - profiles
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ProfileID"
+      requestBody:
+        $ref: "#/components/requestBodies/ProfileUpdateReq"
+      responses:
+        "200":
+          $ref: "#/components/responses/ProfileRes"
+        "400":
+          description: Failed due to malformed JSON.
+        "401":
+          description: Missing or invalid access token provided.
+        "404":
+          description: Profile does not exist.
+        "415":
+          description: Missing or invalid content type.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+    delete:
+      operationId: deleteProfile
+      summary: Deletes a device profile
+      tags:
+        - profiles
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ProfileID"
+      responses:
+        "204":
+          description: Profile deleted.
+        "401":
+          description: Missing or invalid access token provided.
+        "404":
+          description: Profile does not exist.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/bootstrap/profiles/{profileID}/slots:
+    get:
+      operationId: getProfileSlots
+      summary: Retrieves the binding slots declared by a profile
+      tags:
+        - profiles
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ProfileID"
+      responses:
+        "200":
+          description: Binding slots retrieved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  binding_slots:
+                    type: array
+                    nullable: true
+                    items:
+                      $ref: "#/components/schemas/BindingSlot"
+        "401":
+          description: Missing or invalid access token provided.
+        "404":
+          description: Profile does not exist.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/bootstrap/profiles/{profileID}/render-preview:
+    post:
+      operationId: renderPreview
+      summary: Renders a profile template preview
+      description: |
+        Renders the profile's content template with the supplied device context
+        and binding snapshots. No external service calls are made — all data
+        must be supplied in the request body.
+      tags:
+        - profiles
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ProfileID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderPreviewRequest"
+      responses:
+        "200":
+          description: Rendered template output.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content_type:
+                    type: string
+                    enum:
+                      - application/json
+                      - application/yaml
+                      - application/toml
+                      - text/plain
+                  content:
+                    type: string
+                required: [content_type, content]
+        "400":
+          description: Template rendering failed.
+        "401":
+          description: Missing or invalid access token provided.
+        "404":
+          description: Profile does not exist.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  # ── Enrollment bindings ───────────────────────────────────────────────────
+
+  /{workspaceID}/devices/bootstrap/enrollments/{configID}/profile:
+    patch:
+      operationId: assignProfile
+      summary: Assigns a profile to an enrollment
+      tags:
+        - enrollments
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                profile_id:
+                  type: string
+                  format: uuid
+              required:
+                - profile_id
+      responses:
+        "204":
+          description: Profile assigned. The response has no body.
+        "400":
+          description: Failed due to malformed JSON.
+        "401":
+          description: Missing or invalid access token provided.
+        "404":
+          description: Config or profile does not exist.
+        "415":
+          description: Missing or invalid content type.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/bootstrap/enrollments/{configID}/bindings:
+    put:
+      operationId: bindResources
+      summary: Binds resources to profile slots
+      description: |
+        Resolves the requested resource bindings via their owning services,
+        stores snapshots, and marks the enrollment renderable when all required
+        slots are satisfied.
+      tags:
+        - enrollments
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bindings:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/BindingRequest"
+              required:
+                - bindings
+      responses:
+        "204":
+          description: Bindings stored. The response has no body.
+        "400":
+          description: Failed due to malformed JSON or invalid binding request.
+        "401":
+          description: Missing or invalid access token provided.
+        "404":
+          description: Config or resource not found.
+        "415":
+          description: Missing or invalid content type.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+    get:
+      operationId: listBindings
+      summary: Lists binding snapshots for an enrollment
+      tags:
+        - enrollments
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      responses:
+        "200":
+          $ref: "#/components/responses/BindingsRes"
+        "401":
+          description: Missing or invalid access token provided.
+        "404":
+          description: Config does not exist.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /{workspaceID}/devices/bootstrap/enrollments/{configID}/bindings/refresh:
+    post:
+      operationId: refreshBindings
+      summary: Refreshes all binding snapshots
+      description: |
+        Re-resolves every existing binding for the enrollment and updates the
+        stored snapshots with current resource data.
+      tags:
+        - enrollments
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceID"
+        - $ref: "#/components/parameters/ConfigID"
+      responses:
+        "204":
+          description: Bindings refreshed. The response has no body.
+        "401":
+          description: Missing or invalid access token provided.
+        "404":
+          description: Config does not exist.
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  # ── Health ────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      operationId: getHealth
+      summary: Retrieves service health check info.
+      tags:
+        - health
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthRes"
+        "500":
+          $ref: "#/components/responses/ServiceError"
+
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Retrieves Prometheus metrics.
+      tags:
+        - health
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  schemas:
+    Status:
+      type: string
+      enum: [enabled, disabled]
+      description: Enrollment status.
+
+    StatusFilter:
+      type: string
+      enum: [enabled, disabled, all]
+      default: enabled
+      description: |
+        Enrollment status filter. For backward compatibility, the API also
+        accepts `0` for enabled and `1` for disabled.
+
+    Config:
+      type: object
+      description: Bootstrap enrollment representation. Fields omitted by the service are not emitted in JSON.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Enrollment ID.
+        workspace_id:
+          type: string
+          format: uuid
+          description: Workspace the enrollment belongs to.
+        external_id:
+          type: string
+          description: External device identifier (e.g. MAC address).
+        external_key:
+          type: string
+          description: |
+            Per-device Bootstrap root key containing at least 10 characters.
+            Its exact UTF-8 bytes are used as HKDF input. It is encrypted at
+            rest and decrypted only in authorized config create, list and get
+            responses. Responses use `Cache-Control: no-store`.
+          minLength: 10
+        bootstrap_key_version:
+          type: integer
+          format: int64
+          minimum: 1
+          description: |
+            Version of the per-device Bootstrap key. It starts at 1 and is
+            incremented whenever the external key is replaced.
+        name:
+          type: string
+          description: Human-readable name.
+        content:
+          type: string
+          description: Legacy free-form configuration payload.
+        status:
+          $ref: "#/components/schemas/Status"
+        profile_id:
+          type: string
+          format: uuid
+          description: ID of the device profile used for template rendering.
+        render_context:
+          type: object
+          additionalProperties: true
+          description: Per-device variable values injected into the profile template.
+        client_cert:
+          type: string
+          description: Client TLS certificate (PEM).
+        client_key:
+          type: string
+          description: Client TLS private key (PEM).
+        ca_cert:
+          type: string
+          description: CA certificate (PEM).
+
+    ConfigList:
+      type: object
+      properties:
+        total:
+          type: integer
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+          default: 0
+        limit:
+          type: integer
+          maximum: 100
+          default: 10
+        configs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Config"
+      required:
+        - configs
+
+    BootstrapConfig:
+      type: object
+      description: Rendered configuration returned to a bootstrapping device.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Enrollment ID.
+        content:
+          type: string
+          description: Rendered configuration payload.
+        content_type:
+          type: string
+          enum:
+            - application/json
+            - application/yaml
+            - application/toml
+            - text/plain
+          description: Media type used to parse the content string.
+        client_cert:
+          type: string
+          description: Client TLS certificate (PEM).
+        client_key:
+          type: string
+          description: Client TLS private key (PEM).
+        ca_cert:
+          type: string
+          description: CA certificate (PEM).
+      required: [id, content_type, content]
+
+    BootstrapChallenge:
+      type: object
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        server_nonce:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          description: Unpadded base64url encoding of a random 32-byte server nonce.
+        expires_at:
+          type: string
+          format: date-time
+        key_version:
+          type: integer
+          format: int64
+          minimum: 1
+      required: [challenge_id, server_nonce, expires_at, key_version]
+
+    DeviceBootstrapProof:
+      type: object
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        device_nonce:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          description: Unpadded base64url encoding of a fresh random 32-byte device nonce.
+        proof:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          description: Unpadded base64url encoding of the 32-byte HMAC-SHA256 proof.
+      required: [challenge_id, device_nonce, proof]
+
+    EncryptedBootstrapConfig:
+      type: object
+      properties:
+        version:
+          type: string
+          enum: [v1]
+        key_version:
+          type: integer
+          format: int64
+          minimum: 1
+        challenge_id:
+          type: string
+          format: uuid
+        nonce:
+          type: string
+          description: Unpadded base64url encoding of the 12-byte AES-GCM nonce.
+        ciphertext:
+          type: string
+          description: Unpadded base64url encoding of AES-GCM ciphertext followed by its 16-byte tag.
+      required: [version, key_version, challenge_id, nonce, ciphertext]
+
+    ConfigUpdateCerts:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_cert:
+          type: string
+        client_key:
+          type: string
+        ca_cert:
+          type: string
+        workspace_id:
+          type: string
+          format: uuid
+
+    Profile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        workspace_id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+        description:
+          type: string
+        content_format:
+          type: string
+          enum: [go-template, raw, json, yaml, toml]
+          description: Rendering and template format.
+        content_type:
+          type: string
+          enum:
+            - application/json
+            - application/yaml
+            - application/toml
+            - text/plain
+          description: |
+            Media type of the rendered content delivered to devices. This is
+            independent of content_format; for example, a go-template can
+            produce application/json.
+        content_template:
+          type: string
+          description: Template text rendered at bootstrap time.
+        defaults:
+          type: object
+          additionalProperties: true
+          description: Default variable values merged with per-device render_context.
+        binding_slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/BindingSlot"
+          description: Named resource slots declared by this profile.
+        version:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+        - name
+
+    ProfileList:
+      type: object
+      properties:
+        total:
+          type: integer
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          maximum: 100
+        profiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/Profile"
+
+    BindingSlot:
+      type: object
+      description: A named resource placeholder declared by a profile.
+      properties:
+        name:
+          type: string
+          description: Slot name referenced in the template (e.g. "mqtt_client").
+        type:
+          type: string
+          enum: [device, channel]
+          description: Expected ATOM resource type.
+        required:
+          type: boolean
+          default: true
+          description: Whether the slot must be bound before the device can bootstrap.
+        fields:
+          type: array
+          items:
+            type: string
+          description: Resource fields snapshotted at binding time.
+      required:
+        - name
+        - type
+
+    BindingRequest:
+      type: object
+      description: A request to bind a profile slot to a concrete resource.
+      properties:
+        slot:
+          type: string
+          description: Profile slot name to fill.
+        type:
+          type: string
+          enum: [device, channel]
+        resource_id:
+          type: string
+          format: uuid
+          description: ID of the resource in its owning service.
+      required:
+        - slot
+        - type
+        - resource_id
+
+    BindingSnapshot:
+      type: object
+      description: Bootstrap-owned snapshot of a bound resource.
+      properties:
+        config_id:
+          type: string
+          format: uuid
+        slot:
+          type: string
+        type:
+          type: string
+        resource_id:
+          type: string
+          format: uuid
+        snapshot:
+          type: object
+          additionalProperties: true
+          description: Non-secret resource fields captured at binding time.
+        updated_at:
+          type: string
+          format: date-time
+
+    RenderPreviewRequest:
+      type: object
+      description: |
+        Preview input. When `config_id` is supplied, the stored enrollment and
+        bindings are loaded and take precedence over `config` and `bindings`.
+      properties:
+        config_id:
+          type: string
+          format: uuid
+        config:
+          $ref: "#/components/schemas/Config"
+        render_context:
+          type: object
+          additionalProperties: true
+          description: Used when config.render_context is absent.
+        bindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/BindingSnapshot"
+
+  parameters:
+    ConfigID:
+      name: configID
+      description: Unique enrollment config identifier.
+      in: path
+      schema:
+        type: string
+        format: uuid
+      required: true
+
+    ProfileID:
+      name: profileID
+      description: Unique profile identifier.
+      in: path
+      schema:
+        type: string
+        format: uuid
+      required: true
+
+    ExternalID:
+      name: externalID
+      description: External device identifier provided at registration.
+      in: path
+      schema:
+        type: string
+      required: true
+
+    WorkspaceID:
+      name: workspaceID
+      description: Unique workspace identifier.
+      in: path
+      schema:
+        type: string
+        format: uuid
+      required: true
+      example: bb7edb32-2eac-4aad-aebe-ed96fe073879
+
+    Limit:
+      name: limit
+      description: Maximum number of items to return.
+      in: query
+      schema:
+        type: integer
+        default: 10
+        maximum: 100
+        minimum: 1
+      required: false
+
+    Offset:
+      name: offset
+      description: Number of items to skip.
+      in: query
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+      required: false
+
+    Status:
+      name: status
+      description: Filter by enrollment status.
+      in: query
+      schema:
+        $ref: "#/components/schemas/StatusFilter"
+      required: false
+
+    Name:
+      name: name
+      description: Filter by name (partial, case-insensitive match).
+      in: query
+      schema:
+        type: string
+      required: false
+
+    ExternalIDQuery:
+      name: external_id
+      description: Filter configs by exact external device identifier.
+      in: query
+      schema:
+        type: string
+      required: false
+
+    ConfigIDQuery:
+      name: id
+      description: Filter configs by exact enrollment identifier.
+      in: query
+      schema:
+        type: string
+        format: uuid
+      required: false
+
+  requestBodies:
+    ConfigCreateReq:
+      description: New enrollment config.
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              external_id:
+                type: string
+              external_key:
+                type: string
+                oneOf:
+                  - minLength: 10
+                  - maxLength: 0
+                description: |
+                  Optional UTF-8 string containing at least 10 characters.
+                  When omitted or empty, the service generates a strong random
+                  key.
+              name:
+                type: string
+              content:
+                type: string
+              profile_id:
+                type: string
+                format: uuid
+              render_context:
+                type: object
+                additionalProperties: true
+              client_cert:
+                type: string
+              client_key:
+                type: string
+              ca_cert:
+                type: string
+            required:
+              - external_id
+
+    ConfigUpdateReq:
+      description: Fields to update on an enrollment config.
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+              external_key:
+                type: string
+                oneOf:
+                  - minLength: 10
+                  - maxLength: 0
+                description: |
+                  New per-device Bootstrap root key containing at least 10
+                  characters. Its exact UTF-8 bytes are used as HKDF input.
+                  When omitted or empty, the current key is preserved.
+                  Replacing it increments `bootstrap_key_version` and
+                  invalidates outstanding challenges.
+              content:
+                type: string
+              render_context:
+                type: object
+                additionalProperties: true
+
+    ConfigCertUpdateReq:
+      description: Replacement certificate fields.
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              client_cert:
+                type: string
+              client_key:
+                type: string
+              ca_cert:
+                type: string
+
+    ProfileCreateReq:
+      description: New device profile.
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Profile"
+
+    ProfileUpdateReq:
+      description: Updated device profile fields. All fields are optional.
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              content_format:
+                type: string
+                enum: [go-template, raw, json, yaml, toml]
+              content_type:
+                type: string
+                enum:
+                  - application/json
+                  - application/yaml
+                  - application/toml
+                  - text/plain
+              content_template:
+                type: string
+              defaults:
+                type: object
+                additionalProperties: true
+              binding_slots:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BindingSlot"
+
+  responses:
+    ConfigCreateRes:
+      description: Config registered.
+      headers:
+        Location:
+          schema:
+            type: string
+          description: Relative URL of the created config (e.g. /devices/configs/{configID}).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Config"
+
+    ConfigListRes:
+      description: Configs retrieved.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ConfigList"
+
+    ConfigRes:
+      description: Config retrieved.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Config"
+
+    ConfigUpdateCertsRes:
+      description: Config certificates updated.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ConfigUpdateCerts"
+
+    BootstrapConfigRes:
+      description: Rendered bootstrap configuration before device-response encryption.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BootstrapConfig"
+
+    ProfileRes:
+      description: Profile retrieved or created.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Profile"
+
+    ProfileListRes:
+      description: Profiles retrieved.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ProfileList"
+
+    BindingsRes:
+      description: Binding snapshots retrieved.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              bindings:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BindingSnapshot"
+
+    ServiceError:
+      description: Unexpected server-side error occurred.
+
+    BadRequest:
+      description: The request failed validation.
+
+    HealthRes:
+      description: Service health check.
+      content:
+        application/health+json:
+          schema:
+            $ref: "./schemas/health_info.yaml"
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        User access token: "Authorization: Bearer <user_token>"
+
+security:
+  - bearerAuth: []

@@ -1,0 +1,911 @@
+# Copyright (c) Abstract Machines
+# SPDX-License-Identifier: Apache-2.0
+
+openapi: 3.0.1
+info:
+  title: Magistrala Reports API
+  description: HTTP API for report generation and saved report configurations.
+  contact:
+    email: info@absmach.eu
+  license:
+    name: Apache 2.0
+    url: https://github.com/absmach/magistrala/blob/main/LICENSE
+  version: 0.18.5
+
+servers:
+  - url: http://localhost:9017
+  - url: https://localhost:9017
+
+tags:
+  - name: reports
+    description: Report generation and configuration operations
+  - name: health
+    description: Service health
+
+paths:
+  /{workspaceID}/reports:
+    post:
+      operationId: generateReport
+      summary: Generate a report
+      description: |
+        Generates a report from the supplied metrics and configuration.
+        `view` returns JSON, `download` returns a PDF or CSV file, and `email`
+        sends the report and returns an empty successful response. Email settings
+        are required only for the `email` action.
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportAction'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportGenerationRequest'
+            example:
+              config:
+                from: '-1h'
+                to: now
+                title: Temperature report
+                file_format: pdf
+                timezone: Europe/Belgrade
+                aggregation:
+                  agg_type: avg
+                  interval: 5m
+              metrics:
+                - channel_id: 01J9CHANNEL
+                  device_ids: [01J9DEVICE]
+                  name: temperature
+      responses:
+        '200':
+          description: JSON report, generated file, or empty email result depending on `action`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedReport'
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /{workspaceID}/reports/configs:
+    post:
+      operationId: addReportConfig
+      summary: Create a report configuration
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportConfigCreate'
+      responses:
+        '201':
+          $ref: '#/components/responses/ReportConfigCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      operationId: listReportConfigs
+      summary: List report configurations
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Name'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Dir'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/ReportConfigList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /{workspaceID}/reports/configs/{reportID}:
+    get:
+      operationId: viewReportConfig
+      summary: View a report configuration
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportID'
+        - $ref: '#/components/parameters/Roles'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/ReportConfigResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateReportConfig
+      summary: Update a report configuration
+      description: |
+        Updates the main mutable configuration. Metrics, metric configuration,
+        and email settings are required by the current update contract. Use the
+        dedicated schedule and template operations for those fields.
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportID'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportConfigUpdate'
+      responses:
+        '200':
+          $ref: '#/components/responses/ReportConfigResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteReportConfig
+      summary: Delete a report configuration
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportID'
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Report configuration deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /{workspaceID}/reports/configs/{reportID}/schedule:
+    patch:
+      operationId: updateReportSchedule
+      summary: Replace a report schedule
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportID'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleUpdate'
+      responses:
+        '200':
+          $ref: '#/components/responses/ReportConfigResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /{workspaceID}/reports/configs/{reportID}/enable:
+    post:
+      operationId: enableReportConfig
+      summary: Enable a report configuration
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportID'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/ReportConfigResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /{workspaceID}/reports/configs/{reportID}/disable:
+    post:
+      operationId: disableReportConfig
+      summary: Disable a report configuration
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportID'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/ReportConfigResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /{workspaceID}/reports/configs/{reportID}/template:
+    put:
+      operationId: updateReportTemplate
+      summary: Replace a report template
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportID'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportTemplateUpdate'
+      responses:
+        '204':
+          description: Report template updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      operationId: viewReportTemplate
+      summary: View a report template
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportID'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Report template returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportTemplateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteReportTemplate
+      summary: Delete a report template
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceID'
+        - $ref: '#/components/parameters/ReportID'
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Report template deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      operationId: reportsHealth
+      summary: Get service health
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/HealthResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  schemas:
+    ReportConfig:
+      type: object
+      required: [id, name, description, workspace_id, schedule, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+        description:
+          type: string
+        workspace_id:
+          type: string
+          readOnly: true
+        schedule:
+          $ref: '#/components/schemas/Schedule'
+        config:
+          $ref: '#/components/schemas/MetricConfig'
+        email:
+          $ref: '#/components/schemas/EmailSetting'
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequestedMetric'
+        report_template:
+          type: string
+          description: Go template used to render PDF reports.
+        status:
+          $ref: '#/components/schemas/ReportStatus'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_by:
+          type: string
+          readOnly: true
+
+    ReportConfigCreate:
+      type: object
+      required: [name, config, email, metrics]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        schedule:
+          $ref: '#/components/schemas/Schedule'
+        config:
+          $ref: '#/components/schemas/MetricConfig'
+        email:
+          $ref: '#/components/schemas/EmailSetting'
+        metrics:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/RequestedMetric'
+        report_template:
+          type: string
+
+    ReportConfigUpdate:
+      type: object
+      required: [config, email, metrics]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        config:
+          $ref: '#/components/schemas/MetricConfig'
+        email:
+          $ref: '#/components/schemas/EmailSetting'
+        metrics:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/RequestedMetric'
+
+    ReportGenerationRequest:
+      type: object
+      required: [config, metrics]
+      properties:
+        config:
+          $ref: '#/components/schemas/MetricConfig'
+        email:
+          $ref: '#/components/schemas/EmailSetting'
+        metrics:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/RequestedMetric'
+        report_template:
+          type: string
+
+    ReportsConfigPage:
+      type: object
+      required: [total, offset, limit, report_configs]
+      properties:
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          format: int64
+          minimum: 0
+        limit:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000
+        report_configs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportConfig'
+
+    MetricConfig:
+      type: object
+      required: [from, to, title]
+      properties:
+        from:
+          type: string
+          description: Relative or absolute report range start accepted by Magistrala relative-time parsing.
+          example: '-1h'
+        to:
+          type: string
+          description: Relative or absolute report range end accepted by Magistrala relative-time parsing.
+          example: now
+        title:
+          type: string
+          minLength: 1
+        file_format:
+          type: string
+          enum: [pdf, csv]
+          default: pdf
+        timezone:
+          type: string
+          description: IANA timezone name. Empty values use UTC.
+          example: Europe/Belgrade
+        aggregation:
+          $ref: '#/components/schemas/AggregationConfig'
+
+    AggregationConfig:
+      type: object
+      properties:
+        agg_type:
+          type: string
+          enum: [none, max, min, sum, count, avg]
+          default: none
+        interval:
+          type: string
+          description: Go duration required when `agg_type` is not `none`.
+          example: 5m
+
+    EmailSetting:
+      type: object
+      required: [to]
+      properties:
+        to:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: email
+        subject:
+          type: string
+        content:
+          type: string
+
+    RequestedMetric:
+      type: object
+      required: [channel_id, name]
+      properties:
+        channel_id:
+          type: string
+        device_ids:
+          type: array
+          items:
+            type: string
+        name:
+          type: string
+        subtopic:
+          type: string
+        protocol:
+          type: string
+        format:
+          type: string
+
+    GeneratedReport:
+      type: object
+      required: [total, from, to, aggregation, reports]
+      properties:
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        aggregation:
+          $ref: '#/components/schemas/AggregationConfig'
+        reports:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricReport'
+
+    MetricReport:
+      type: object
+      properties:
+        metric:
+          $ref: '#/components/schemas/Metric'
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/SenMLMessage'
+
+    Metric:
+      type: object
+      properties:
+        channel_id:
+          type: string
+        device_id:
+          type: string
+        name:
+          type: string
+        subtopic:
+          type: string
+        protocol:
+          type: string
+        format:
+          type: string
+
+    SenMLMessage:
+      type: object
+      properties:
+        channel:
+          type: string
+        subtopic:
+          type: string
+        publisher:
+          type: string
+        protocol:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        time:
+          type: number
+          format: double
+        update_time:
+          type: number
+          format: double
+        value:
+          type: number
+          format: double
+          nullable: true
+        string_value:
+          type: string
+          nullable: true
+        data_value:
+          type: string
+          nullable: true
+        bool_value:
+          type: boolean
+          nullable: true
+        sum:
+          type: number
+          format: double
+          nullable: true
+        device_id:
+          type: string
+
+    Schedule:
+      type: object
+      properties:
+        start_datetime:
+          type: string
+          format: date-time
+          nullable: true
+          description: Activation time. A supplied value cannot be in the past.
+        time:
+          type: string
+          format: date-time
+          description: Next scheduled execution time.
+        recurring:
+          type: string
+          enum: [none, hourly, daily, weekly, monthly]
+          default: none
+        recurring_period:
+          type: integer
+          minimum: 0
+          description: Must be at least 1 when recurrence is not `none`.
+
+    ScheduleUpdate:
+      type: object
+      required: [schedule]
+      properties:
+        schedule:
+          $ref: '#/components/schemas/Schedule'
+
+    ReportStatus:
+      type: string
+      enum: [enabled, disabled, deleted]
+
+    ReportTemplateUpdate:
+      type: object
+      required: [report_template]
+      properties:
+        report_template:
+          type: string
+          minLength: 1
+          description: Valid Magistrala report Go template.
+
+    ReportTemplateResponse:
+      type: object
+      required: [html_template]
+      properties:
+        html_template:
+          type: string
+
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: entity not found
+
+  parameters:
+    WorkspaceID:
+      name: workspaceID
+      in: path
+      required: true
+      schema:
+        type: string
+    ReportID:
+      name: reportID
+      in: path
+      required: true
+      schema:
+        type: string
+    ReportAction:
+      name: action
+      in: query
+      schema:
+        type: string
+        enum: [view, download, email]
+        default: view
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+        default: 0
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 1000
+        default: 10
+    Name:
+      name: name
+      in: query
+      schema:
+        type: string
+    Status:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [enabled, disabled, deleted, all]
+        default: enabled
+    Order:
+      name: order
+      in: query
+      schema:
+        type: string
+        enum: [name, created_at, updated_at]
+        default: updated_at
+    Dir:
+      name: dir
+      in: query
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: desc
+    Roles:
+      name: roles
+      in: query
+      schema:
+        type: boolean
+        default: false
+
+  responses:
+    ReportConfigCreated:
+      description: Report configuration created
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReportConfig'
+    ReportConfigResponse:
+      description: Report configuration returned
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReportConfig'
+    ReportConfigList:
+      description: Paginated report configurations returned
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReportsConfigPage'
+    BadRequest:
+      description: Invalid path, query parameters, or request body
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid authentication credentials
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The caller is not authorized for this operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Report configuration not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Report configuration conflicts with an existing entity
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnsupportedMediaType:
+      description: Content-Type is missing or is not application/json
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnprocessableEntity:
+      description: The request was valid but could not be processed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalServerError:
+      description: Unexpected server-side error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HealthResponse:
+      description: Service health
+      content:
+        application/health+json:
+          schema:
+            $ref: './schemas/health_info.yaml'
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
