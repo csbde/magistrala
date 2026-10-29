@@ -24,7 +24,7 @@ import (
 
 type Server struct {
 	router     *chi.Mux
-	store      *store.MemoryStore
+	store      store.Storage
 	casbin     *casbin.Manager
 	oidcSvc    *oidc.Service
 	jwtSecret  []byte
@@ -40,7 +40,7 @@ type TokenClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewServer(memStore *store.MemoryStore, casbinMgr *casbin.Manager, oidcConfig *oidc.Config, distFS fs.FS) (*Server, error) {
+func NewServer(memStore store.Storage, casbinMgr *casbin.Manager, oidcConfig *oidc.Config, distFS fs.FS) (*Server, error) {
 	jwtSecret := []byte(os.Getenv("MG_JWT_SECRET"))
 	if len(jwtSecret) == 0 {
 		jwtSecret = []byte("magistrala-ui-super-secret-key-change-in-prod-2026")
