@@ -10,11 +10,12 @@ export const UsersModule: React.FC = () => {
   const t = dict[language]
   const queryClient = useQueryClient()
 
-  const { data: users = [], isLoading } = useQuery({
+  const { data: rawUsers, isLoading } = useQuery({
     queryKey: ['/api/users', currentWorkspace?.id],
-    queryFn: () => fetchApi<any[]>('/api/users'),
+    queryFn: () => fetchApi<any>('/api/users'),
     enabled: !!currentWorkspace?.id,
   })
+  const users: any[] = Array.isArray(rawUsers) ? rawUsers : rawUsers?.items ?? []
 
   const { data: roleData } = useQuery({
     queryKey: ['/api/roles', currentWorkspace?.id],

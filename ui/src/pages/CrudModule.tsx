@@ -28,11 +28,12 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
 
   const queryKey = [endpoint, currentWorkspace?.id]
 
-  const { data = [], isLoading, error } = useQuery({
+  const { data: rawData, isLoading, error } = useQuery({
     queryKey,
-    queryFn: () => fetchApi<any[]>(endpoint),
+    queryFn: () => fetchApi<any>(endpoint),
     enabled: !!currentWorkspace?.id,
   })
+  const data: any[] = Array.isArray(rawData) ? rawData : rawData?.items ?? []
 
   const createMutation = useMutation({
     mutationFn: (newObj: any) =>
