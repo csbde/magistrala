@@ -66,8 +66,15 @@ func main() {
 		storage = pgStore
 		log.Printf("[DB] 外部 PostgreSQL 连接并自动完成数据表结构迁移 (AutoMigrate)")
 	} else {
-		log.Printf("[DB] 未检测到 DATABASE_URL，运行在内存演示模式 (可通过 config.env 配置外部 PG)")
-		storage = store.NewMemoryStore()
+		_ = os.MkdirAll("data", 0755)
+		dbPath := "data/magistrala.db"
+		log.Printf("[DB] 未检测到 DATABASE_URL，默认采用本地轻量存储: %s (可通过 DATABASE_URL 配置外部 PostgreSQL)", dbPath)
+		sqliteStore, err := store.NewSQLiteStore(dbPath)
+		if err != nil {
+			log.Printf("[DB 提示] 本地文件打开失败，退回纯内存运行模式: %v", err)
+			sqliteStore, _ = store.NewSQLiteStore(":memory:")
+		}
+		storage = sqliteStore
 	}
 
 	casbinMgr, err := casbin.NewCasbinManager()

@@ -40,7 +40,7 @@ type TokenClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewServer(memStore store.Storage, casbinMgr *casbin.Manager, oidcConfig *oidc.Config, distFS fs.FS) (*Server, error) {
+func NewServer(storage store.Storage, casbinMgr *casbin.Manager, oidcConfig *oidc.Config, distFS fs.FS) (*Server, error) {
 	jwtSecret := []byte(os.Getenv("MG_JWT_SECRET"))
 	if len(jwtSecret) == 0 {
 		jwtSecret = []byte("magistrala-ui-super-secret-key-change-in-prod-2026")
@@ -58,7 +58,7 @@ func NewServer(memStore store.Storage, casbinMgr *casbin.Manager, oidcConfig *oi
 
 	s := &Server{
 		router:    chi.NewRouter(),
-		store:     memStore,
+		store:     storage,
 		casbin:    casbinMgr,
 		oidcSvc:   oidcSvc,
 		jwtSecret: jwtSecret,
@@ -99,6 +99,10 @@ func (s *Server) setupRoutes() {
 			})
 		})
 
+		// FluxMQ / MQTT Auth webhook endpoints (for external Broker authentication)
+		api.Post("/auth/mqtt", s.handleMQTTAuth)
+		api.Post("/auth/mqtt/acl", s.handleMQTTACL)
+
 		// Auth & OIDC
 		api.Post("/auth/login", s.handlePasswordLogin)
 		api.Get("/auth/oidc/login", s.handleOIDCLogin)
@@ -125,26 +129,108 @@ func (s *Server) setupRoutes() {
 				// Devices
 				scoped.Get("/devices", s.handleListDevices)
 				scoped.Post("/devices", s.handleCreateDevice)
+				scoped.Get("/devices/{id}", s.handleGetDevice)
+				scoped.Put("/devices/{id}", s.handleUpdateDevice)
 				scoped.Delete("/devices/{id}", s.handleDeleteDevice)
+				scoped.Post("/devices/{id}/secret", s.handleResetDeviceSecret)
+				scoped.Get("/devices/{id}/channels", s.handleListDeviceChannels)
+				scoped.Post("/devices/{id}/channels/{channel_id}", s.handleConnectChannel)
+				scoped.Delete("/devices/{id}/channels/{channel_id}", s.handleDisconnectChannel)
+
+				// Gateways (Device with IsGateway=true)
+				scoped.Get("/gateways", s.handleListGateways)
+				scoped.Post("/gateways", s.handleCreateGateway)
+				scoped.Get("/gateways/{id}/devices", s.handleListGatewayDevices)
+				scoped.Post("/gateways/{id}/devices", s.handleBindGatewayDevice)
+				scoped.Delete("/gateways/{id}/devices/{device_id}", s.handleUnbindGatewayDevice)
 
 				// Channels
 				scoped.Get("/channels", s.handleListChannels)
 				scoped.Post("/channels", s.handleCreateChannel)
+				scoped.Get("/channels/{id}", s.handleGetChannel)
+				scoped.Put("/channels/{id}", s.handleUpdateChannel)
 				scoped.Delete("/channels/{id}", s.handleDeleteChannel)
+				scoped.Get("/channels/{id}/devices", s.handleListChannelDevices)
+
+				// Messages & Live Console
+				scoped.Get("/channels/{id}/messages", s.handleListMessages)
+				scoped.Post("/channels/{id}/messages", s.handleSendMessage)
 
 				// Groups
 				scoped.Get("/groups", s.handleListGroups)
 				scoped.Post("/groups", s.handleCreateGroup)
+				scoped.Get("/groups/{id}", s.handleGetGroup)
+				scoped.Put("/groups/{id}", s.handleUpdateGroup)
 				scoped.Delete("/groups/{id}", s.handleDeleteGroup)
+				scoped.Post("/groups/{id}/members", s.handleAssignToGroup)
+				scoped.Delete("/groups/{id}/members/{entity_id}", s.handleRemoveFromGroup)
 
 				// Rules
 				scoped.Get("/rules", s.handleListRules)
 				scoped.Post("/rules", s.handleCreateRule)
+				scoped.Put("/rules/{id}", s.handleUpdateRule)
 				scoped.Delete("/rules/{id}", s.handleDeleteRule)
 
 				// Alarms
 				scoped.Get("/alarms", s.handleListAlarms)
 				scoped.Post("/alarms", s.handleCreateAlarm)
+				scoped.Post("/alarms/{id}/action", s.handleAlarmAction)
+
+				// Bootstrap Profiles
+				scoped.Get("/bootstraps/profiles", s.handleListBootstrapProfiles)
+				scoped.Post("/bootstraps/profiles", s.handleCreateBootstrapProfile)
+				scoped.Delete("/bootstraps/profiles/{id}", s.handleDeleteBootstrapProfile)
+
+				// Bootstrap Configs
+				scoped.Get("/bootstraps/configs", s.handleListBootstrapConfigs)
+				scoped.Post("/bootstraps/configs", s.handleCreateBootstrapConfig)
+				scoped.Put("/bootstraps/configs/{id}", s.handleUpdateBootstrapConfig)
+				scoped.Delete("/bootstraps/configs/{id}", s.handleDeleteBootstrapConfig)
+
+				// Device Types & Versions
+				scoped.Get("/device-types", s.handleListDeviceTypes)
+				scoped.Post("/device-types", s.handleCreateDeviceType)
+				scoped.Get("/device-types/{id}", s.handleGetDeviceType)
+				scoped.Put("/device-types/{id}", s.handleUpdateDeviceType)
+				scoped.Delete("/device-types/{id}", s.handleDeleteDeviceType)
+				scoped.Get("/device-types/{id}/versions", s.handleListDeviceTypeVersions)
+				scoped.Post("/device-types/{id}/versions", s.handleCreateDeviceTypeVersion)
+				scoped.Delete("/device-types/{id}/versions/{version_id}", s.handleDeleteDeviceTypeVersion)
+
+				// Dashboards
+				scoped.Get("/dashboards", s.handleListDashboards)
+				scoped.Post("/dashboards", s.handleCreateDashboard)
+				scoped.Get("/dashboards/{id}", s.handleGetDashboard)
+				scoped.Put("/dashboards/{id}", s.handleUpdateDashboard)
+				scoped.Delete("/dashboards/{id}", s.handleDeleteDashboard)
+
+				// Reports
+				scoped.Get("/reports", s.handleListReports)
+				scoped.Post("/reports", s.handleCreateReport)
+				scoped.Get("/reports/{id}", s.handleGetReport)
+				scoped.Put("/reports/{id}", s.handleUpdateReport)
+				scoped.Delete("/reports/{id}", s.handleDeleteReport)
+
+				// Custom Nodes (WASM / Scripts)
+				scoped.Get("/custom-nodes", s.handleListCustomNodes)
+				scoped.Post("/custom-nodes", s.handleCreateCustomNode)
+				scoped.Put("/custom-nodes/{id}", s.handleUpdateCustomNode)
+				scoped.Delete("/custom-nodes/{id}", s.handleDeleteCustomNode)
+
+				// Journals / Audit Logs
+				scoped.Get("/journals", s.handleListJournals)
+
+				// Invitations
+				scoped.Get("/invitations", s.handleListInvitations)
+				scoped.Post("/invitations", s.handleCreateInvitation)
+				scoped.Delete("/invitations/{id}", s.handleDeleteInvitation)
+
+				// Support Tickets
+				scoped.Get("/support/tickets", s.handleListSupportTickets)
+				scoped.Post("/support/tickets", s.handleCreateSupportTicket)
+
+				// Platform Info (MQTT / FluxMQ connection hints)
+				scoped.Get("/platform/info", s.handlePlatformInfo)
 
 				// Users & Roles in Workspace
 				scoped.Get("/users", s.handleListUsers)
@@ -214,12 +300,10 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Inject into context
 		ctx := context.WithValue(r.Context(), "user_id", claims.UserID)
 		ctx = context.WithValue(ctx, "email", claims.Email)
 		ctx = context.WithValue(ctx, "claims", claims)
 
-		// Workspace Header override or claim fallback
 		wsID := r.Header.Get("X-Workspace-Id")
 		if wsID == "" {
 			wsID = claims.WorkspaceID
@@ -244,7 +328,6 @@ func (s *Server) casbinMiddleware(next http.Handler) http.Handler {
 		obj := r.URL.Path
 		act := r.Method
 
-		// If user is superadmin / platform admin
 		for _, role := range claims.Roles {
 			if role == "role:admin" || role == "admin" {
 				next.ServeHTTP(w, r)
@@ -254,7 +337,6 @@ func (s *Server) casbinMiddleware(next http.Handler) http.Handler {
 
 		allowed, err := s.casbin.CheckPermission(sub, dom, obj, act)
 		if err != nil || !allowed {
-			// Also check if assigned via user's tenant role
 			roles := s.casbin.GetRolesForUserInTenant(sub, dom)
 			roleAllowed := false
 			for _, role := range roles {

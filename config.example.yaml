@@ -1,0 +1,38 @@
+# ==============================================================================
+# Magistrala 物联网管理控制台 - YAML 格式配置参考
+# ==============================================================================
+
+server:
+  port: 8080
+  jwt_secret: "super-secret-key-change-me-in-production-2026"
+
+database:
+  # 外部 PostgreSQL 数据库连接串
+  # 若未配置，系统自动使用本地纯 Go SQLite (data/magistrala.db)
+  url: "postgres://postgres:postgres@localhost:5432/magistrala?sslmode=disable"
+  host: "127.0.0.1"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  name: "magistrala"
+
+oidc:
+  enabled: false
+  provider_name: "企业统一身份认证 (OIDC SSO)"
+  issuer_url: "https://sso.example.com/realms/master"
+  client_id: "magistrala-console"
+  client_secret: "your-oidc-client-secret"
+  redirect_url: "http://localhost:8080/api/auth/oidc/callback"
+  scopes:
+    - openid
+    - profile
+    - email
+
+fluxmq:
+  broker_host: "127.0.0.1"
+  broker_port: 1883
+  tls_port: 8883
+  ws_port: 8083
+  # Webhook 鉴权回调接口
+  auth_webhook: "http://127.0.0.1:8080/api/auth/mqtt"
+  acl_webhook: "http://127.0.0.1:8080/api/auth/mqtt/acl"
