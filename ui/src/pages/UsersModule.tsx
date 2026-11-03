@@ -1,14 +1,20 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi } from '../lib/api'
 import { useAuthStore } from '../store/authStore'
 import { dict } from '../lib/i18n'
-import { Shield, ShieldCheck } from 'lucide-react'
+import { Shield, ShieldCheck, UserPlus } from 'lucide-react'
+import { useToast } from '../components/ui/Toast'
+import { EmptyState, Button, Dialog, Input, Select } from '../components/ui/primitives'
 
 export const UsersModule: React.FC = () => {
   const { currentWorkspace, language } = useAuthStore()
   const t = dict[language]
   const queryClient = useQueryClient()
+  const { success, error: toastError } = useToast()
+
+  const [createOpen, setCreateOpen] = useState(false)
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'role:viewer' })
 
   const { data: rawUsers, isLoading } = useQuery({
     queryKey: ['/api/users', currentWorkspace?.id],
@@ -31,19 +37,53 @@ export const UsersModule: React.FC = () => {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] })
+      success('角色分配已更新')
     },
     onError: (err: any) => {
-      alert(err.message || '分配角色失败')
+      toastError(err.message || '分配角色失败')
+    },
+  })
+
+  const createUserMutation = useMutation({
+    mutationFn: (payload: any) =>
+      fetchApi('/api/users', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: async (createdUser: any) => {
+      if (form.role && createdUser?.id) {
+        try {
+          await fetchApi('/api/roles/assign', {
+            method: 'POST',
+            body: JSON.stringify({ user_id: createdUser.id, role: form.role }),
+          })
+        } catch {
+          // ignore
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] })
+      setCreateOpen(false)
+      setForm({ name: '', email: '', password: '', role: 'role:viewer' })
+      success('用户添加成功')
+    },
+    onError: (err: any) => {
+      toastError(err.message || '创建用户失败')
     },
   })
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-bold text-slate-800">用户成员与 Casbin 权限体系</h2>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Casbin RBAC (g = _, _, _) 针对当前租户 (Domain: {currentWorkspace?.id}) 进行隔离
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800">用户成员与 Casbin 权限体系</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Casbin RBAC (g = _, _, _) 针对当前租户 (Domain: {currentWorkspace?.id}) 进行隔离
+          </p>
+        </div>
+        <Button onClick={() => setCreateOpen(true)} className="flex items-center gap-1.5">
+          <UserPlus className="w-4 h-4" />
+          <span>添加成员</span>
+        </Button>
       </div>
 
       {/* Role explanation */}
@@ -62,7 +102,9 @@ export const UsersModule: React.FC = () => {
       {/* Table */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         {isLoading ? (
-          <div className="p-12 text-center text-slate-400 text-sm">{t.loading}</div>
+          <EmptyState text="" loading />
+        ) : users.length === 0 ? (
+          <EmptyState text={t.noData} />
         ) : (
           <table className="w-full text-left border-collapse text-sm">
             <thead>
@@ -76,8 +118,15 @@ export const UsersModule: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {users.map((item: any) => (
                 <tr key={item.id} className="hover:bg-slate-50/60">
-                  <td className="py-3 px-4 font-medium text-slate-800">{item.name}</td>
-                  <td className="py-3 px-4 text-slate-600">{item.email}</td>
+                  <td className="py-3 px-4 font-medium text-slate-800">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-blue-50 text-blue-600 text-xs font-bold flex items-center justify-center">
+                        {item.name?.[0]?.toUpperCase() || item.email?.[0]?.toUpperCase()}
+                      </div>
+                      <span>{item.name}</span>
+                    </div>
+                  </td>
+                  <td className="py-3 px-4 text-slate-600 font-mono text-xs">{item.email}</td>
                   <td className="py-3 px-4">
                     <div className="flex flex-wrap gap-1">
                       {item.workspace_roles && item.workspace_roles.length > 0 ? (
@@ -97,7 +146,7 @@ export const UsersModule: React.FC = () => {
                   </td>
                   <td className="py-3 px-4 text-right">
                     <select
-                      className="text-xs border border-slate-300 rounded px-2 py-1 bg-white text-slate-700"
+                      className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 hover:border-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       onChange={(e) => {
                         if (e.target.value) {
                           assignMutation.mutate({ userId: item.id, role: e.target.value })
@@ -120,6 +169,75 @@ export const UsersModule: React.FC = () => {
           </table>
         )}
       </div>
+
+      {/* Create User Dialog */}
+      <Dialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="添加租户成员"
+        description="新建账号或加入当前 Casbin 授权空间"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            createUserMutation.mutate({
+              name: form.name,
+              email: form.email,
+              password: form.password,
+            })
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">用户姓名 *</label>
+            <Input
+              required
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="例如：张工"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">电子邮箱 *</label>
+            <Input
+              required
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              placeholder="zhang@company.com"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">初始密码 *</label>
+            <Input
+              required
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              placeholder="至少 8 位安全密码"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">授予角色</label>
+            <Select
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value })}
+            >
+              <option value="role:admin">role:admin (管理员 - 完全权限)</option>
+              <option value="role:editor">role:editor (操作员 - 可读写管理设备)</option>
+              <option value="role:viewer">role:viewer (只读 - 仅查看监控)</option>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+              {t.cancel}
+            </Button>
+            <Button type="submit" loading={createUserMutation.isPending}>
+              {t.save}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   )
 }

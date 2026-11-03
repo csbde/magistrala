@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { fetchApi } from '../lib/api'
 import { dict } from '../lib/i18n'
-import { ShieldCheck, LogIn, KeyRound } from 'lucide-react'
+import { ShieldCheck, LogIn, KeyRound, Loader2, Sparkles } from 'lucide-react'
 
 export const Login: React.FC = () => {
   const { setAuth, language, setLanguage } = useAuthStore()
@@ -50,10 +50,21 @@ export const Login: React.FC = () => {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-slate-800 py-8 px-4 shadow-xl ring-1 ring-white/10 sm:rounded-2xl sm:px-10">
-          <div className="flex justify-end mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <button
+              type="button"
+              onClick={() => {
+                setEmail('admin@magistrala.local')
+                setPassword('12345678')
+              }}
+              className="text-xs text-slate-400 hover:text-blue-400 flex items-center gap-1 transition"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+              <span>默认管理员账号</span>
+            </button>
             <button
               onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-              className="text-xs text-blue-400 hover:text-blue-300 font-medium px-2 py-1 rounded bg-slate-700/50 border border-slate-600"
+              className="text-xs text-blue-400 hover:text-blue-300 font-medium px-2 py-1 rounded bg-slate-700/50 border border-slate-600 transition"
             >
               {language === 'zh' ? 'English' : '中文'}
             </button>
@@ -102,10 +113,10 @@ export const Login: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="flex w-full justify-center items-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50"
+                className="flex w-full justify-center items-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 transition"
               >
-                <LogIn className="w-4 h-4" />
-                {loading ? t.loading : t.login}
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+                <span>{loading ? t.loading : t.login}</span>
               </button>
             </div>
           </form>

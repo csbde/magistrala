@@ -13,17 +13,21 @@ import {
   EmptyState,
 } from '../components/ui/primitives'
 import { Plus, Cpu, Radio, Unlink, Link2, Trash2 } from 'lucide-react'
+import { useToast } from '../components/ui/Toast'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 
 export const GatewaysModule: React.FC = () => {
   const { currentWorkspace, language } = useAuthStore()
   const t = dict[language]
   const qc = useQueryClient()
+  const { success, error: toastError } = useToast()
 
   const [createOpen, setCreateOpen] = useState(false)
   const [selectedGw, setSelectedGw] = useState<Device | null>(null)
   const [bindOpen, setBindOpen] = useState(false)
   const [bindDeviceId, setBindDeviceId] = useState('')
   const [name, setName] = useState('')
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
 
   const wsKey = ['gateways', currentWorkspace?.id]
 
@@ -51,12 +55,14 @@ export const GatewaysModule: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({ name, is_gateway: true, status: 'enabled' }),
       }),
-    onSuccess: () => {
+    onSuccess: (newGw) => {
       qc.invalidateQueries({ queryKey: wsKey })
       setCreateOpen(false)
       setName('')
+      setSelectedGw(newGw)
+      success('边缘网关创建成功')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '创建网关失败'),
   })
 
   const bind = useMutation({
@@ -69,21 +75,32 @@ export const GatewaysModule: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['gateway-devices', selectedGw?.id] })
       setBindOpen(false)
       setBindDeviceId('')
+      success('子设备挂载成功')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '挂载子设备失败'),
   })
 
   const unbind = useMutation({
     mutationFn: (childId: string) =>
       fetchApi(`/api/gateways/${selectedGw!.id}/devices/${childId}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['gateway-devices', selectedGw?.id] }),
-    onError: (e: any) => alert(e.message),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['gateway-devices', selectedGw?.id] })
+      success('已解除子设备挂载')
+    },
+    onError: (e: any) => toastError(e.message || '解除挂载失败'),
   })
 
   const deleteGw = useMutation({
     mutationFn: (id: string) => fetchApi(`/api/devices/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: wsKey }),
-    onError: (e: any) => alert(e.message),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: wsKey })
+      setDeleteTargetId(null)
+      if (selectedGw?.id === deleteTargetId) {
+        setSelectedGw(null)
+      }
+      success('边缘网关已删除')
+    },
+    onError: (e: any) => toastError(e.message || '删除网关失败'),
   })
 
   const gateways = data?.items ?? []
@@ -98,7 +115,7 @@ export const GatewaysModule: React.FC = () => {
           <h2 className="text-xl font-bold text-slate-800">{t.gateways}</h2>
           <p className="text-xs text-slate-500 mt-0.5">边缘网关负责汇聚现场子设备通信，支持协议转换与集中接入</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
+        <Button onClick={() => setCreateOpen(true)} className="flex items-center gap-1.5">
           <Plus className="w-4 h-4" />
           <span>新建边缘网关</span>
         </Button>
@@ -106,11 +123,14 @@ export const GatewaysModule: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         {/* Gateway List */}
-        <div className="md:col-span-1 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="p-3 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">网关列表</div>
+        <div className="md:col-span-1 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
+          <div className="p-3 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600 flex items-center justify-between">
+            <span>网关列表</span>
+            <span className="text-[11px] text-slate-400 font-mono">{gateways.length} 台</span>
+          </div>
           {isLoading && <EmptyState text="" loading />}
           {!isLoading && gateways.length === 0 && <EmptyState text="暂无网关" />}
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-slate-100 flex-1 overflow-y-auto max-h-[600px]">
             {gateways.map((g) => {
               const active = selectedGw?.id === g.id
               return (
@@ -128,16 +148,17 @@ export const GatewaysModule: React.FC = () => {
                       <div className="text-[11px] font-mono text-slate-400">{g.id}</div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-2">
                     <StatusBadge status={g.status} />
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        if (confirm(t.confirmDelete)) deleteGw.mutate(g.id)
+                        setDeleteTargetId(g.id)
                       }}
-                      className="text-slate-400 hover:text-red-500 p-1"
+                      className="text-slate-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition"
+                      title={t.delete}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
@@ -146,13 +167,15 @@ export const GatewaysModule: React.FC = () => {
           </div>
         </div>
 
-        {/* Children Management */}
-        <div className="md:col-span-2 bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-4">
+        {/* Selected Gateway Detail & Children */}
+        <div className="md:col-span-2 bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-5">
           {!selectedGw ? (
-            <div className="p-16 text-center text-slate-400 text-sm">请在左侧选择一个网关以管理其挂载的子设备</div>
+            <div className="py-24 text-center text-slate-400 text-sm">
+              请从左侧选择一个边缘网关查看详情与挂载子设备
+            </div>
           ) : (
             <>
-              <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200">
                 <div>
                   <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                     <Cpu className="w-5 h-5 text-indigo-600" />
@@ -163,14 +186,16 @@ export const GatewaysModule: React.FC = () => {
                     <CopyButton text={selectedGw.id} />
                   </div>
                 </div>
-                <Button size="sm" onClick={() => setBindOpen(true)}>
+                <Button size="sm" onClick={() => setBindOpen(true)} className="flex items-center gap-1.5">
                   <Link2 className="w-4 h-4" />
                   <span>添加子设备</span>
                 </Button>
               </div>
 
               <div>
-                <div className="text-xs font-semibold text-slate-700 mb-2">挂载子设备列表（{childrenQuery.data?.length ?? 0}）</div>
+                <div className="text-xs font-semibold text-slate-700 mb-2">
+                  挂载子设备列表（{childrenQuery.data?.length ?? 0}）
+                </div>
                 {childrenQuery.isLoading ? (
                   <EmptyState text="" loading />
                 ) : (childrenQuery.data ?? []).length === 0 ? (
@@ -180,7 +205,7 @@ export const GatewaysModule: React.FC = () => {
                 ) : (
                   <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 overflow-hidden">
                     {(childrenQuery.data ?? []).map((c) => (
-                      <div key={c.id} className="flex items-center justify-between p-3 hover:bg-slate-50">
+                      <div key={c.id} className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
                         <div className="flex items-center gap-2.5">
                           <Radio className="w-4 h-4 text-slate-400" />
                           <div>
@@ -233,7 +258,9 @@ export const GatewaysModule: React.FC = () => {
         footer={
           <>
             <Button variant="outline" onClick={() => setBindOpen(false)}>{t.cancel}</Button>
-            <Button disabled={!bindDeviceId} onClick={() => bindDeviceId && bind.mutate(bindDeviceId)}>确认挂载</Button>
+            <Button disabled={!bindDeviceId} loading={bind.isPending} onClick={() => bindDeviceId && bind.mutate(bindDeviceId)}>
+              确认挂载
+            </Button>
           </>
         }
       >
@@ -260,6 +287,17 @@ export const GatewaysModule: React.FC = () => {
           </div>
         </div>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTargetId}
+        title="确认删除网关"
+        message="删除边缘网关将解除所有子设备绑定，确定要删除吗？"
+        loading={deleteGw.isPending}
+        onConfirm={() => {
+          if (deleteTargetId) deleteGw.mutate(deleteTargetId)
+        }}
+        onClose={() => setDeleteTargetId(null)}
+      />
     </div>
   )
 }

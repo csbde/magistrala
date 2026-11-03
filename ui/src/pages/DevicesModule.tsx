@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi } from '../lib/api'
 import { useAuthStore } from '../store/authStore'
 import { dict } from '../lib/i18n'
+import { useToast } from '../components/ui/Toast'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import type { Device, Channel, MessageRecord, Alarm, Journal, Page } from '../types'
 import {
   Button,
@@ -44,6 +46,7 @@ export const DevicesModule: React.FC = () => {
   const { currentWorkspace, language } = useAuthStore()
   const t = dict[language]
   const qc = useQueryClient()
+  const { success, error: toastError } = useToast()
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -54,6 +57,7 @@ export const DevicesModule: React.FC = () => {
   const [secretTarget, setSecretTarget] = useState<Device | null>(null)
   const [newSecret, setNewSecret] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+  const [deleteTarget, setDeleteTarget] = useState<Device | null>(null)
 
   const [form, setForm] = useState({
     name: '',
@@ -84,21 +88,29 @@ export const DevicesModule: React.FC = () => {
       qc.invalidateQueries({ queryKey: wsKey })
       setCreateOpen(false)
       setForm({ name: '', device_type: '', is_gateway: false, tags: '', metadata: '{\n  "location": "",\n  "firmware": "v1.0.0"\n}', status: 'enabled' })
+      success('设备创建成功')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '创建设备失败'),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => fetchApi(`${'/api/devices'}/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: wsKey }),
-    onError: (e: any) => alert(e.message),
+    mutationFn: (id: string) => fetchApi(`/api/devices/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: wsKey })
+      setDeleteTarget(null)
+      success('设备已删除')
+    },
+    onError: (e: any) => toastError(e.message || '删除设备失败'),
   })
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       fetchApi<Device>(`/api/devices/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: wsKey }),
-    onError: (e: any) => alert(e.message),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: wsKey })
+      success(vars.status === 'enabled' ? '设备已启用' : '设备已停用')
+    },
+    onError: (e: any) => toastError(e.message || '状态更新失败'),
   })
 
   const resetMutation = useMutation({
@@ -106,22 +118,24 @@ export const DevicesModule: React.FC = () => {
     onSuccess: (res) => {
       setNewSecret(res.secret)
       qc.invalidateQueries({ queryKey: wsKey })
+      success('密钥重置成功')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '重置密钥失败'),
   })
 
   const connectMutation = useMutation({
     mutationFn: ({ deviceId, channelId, disconnect }: { deviceId: string; channelId: string; disconnect?: boolean }) =>
       fetchApi(`/api/devices/${deviceId}/channels/${channelId}`, { method: disconnect ? 'DELETE' : 'POST' }),
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: wsKey })
       qc.invalidateQueries({ queryKey: ['device-channels', detailDevice?.id] })
+      success(vars.disconnect ? '已解除通道连接' : '通道绑定成功')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '操作失败'),
   })
 
-  const devices = data?.items ?? []
-  const channels = channelsData?.items ?? []
+  const devices = useMemo(() => data?.items ?? [], [data])
+  const channels = useMemo(() => channelsData?.items ?? [], [channelsData])
 
   const filtered = useMemo(
     () =>
@@ -149,7 +163,7 @@ export const DevicesModule: React.FC = () => {
     try {
       metadata = form.metadata ? JSON.parse(form.metadata) : {}
     } catch {
-      alert('Metadata 必须是合法的 JSON 格式')
+      toastError('Metadata 必须是合法的 JSON 格式')
       return
     }
     createMutation.mutate({
@@ -299,9 +313,7 @@ export const DevicesModule: React.FC = () => {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(t.confirmDelete)) deleteMutation.mutate(d.id)
-                          }}
+                          onClick={() => setDeleteTarget(d)}
                           title={t.delete}
                         >
                           <Trash2 className="w-3.5 h-3.5 text-red-500" />
@@ -442,6 +454,17 @@ export const DevicesModule: React.FC = () => {
           </div>
         )}
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="确认删除设备"
+        message={deleteTarget ? `确定要删除设备「${deleteTarget.name}」(${deleteTarget.id}) 吗？删除后该设备的密钥与通道路由均将失效。` : ''}
+        loading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleteTarget) deleteMutation.mutate(deleteTarget.id)
+        }}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
@@ -497,14 +520,16 @@ const DeviceGeneralTab: React.FC<{ device: Device; onChanged: () => void }> = ({
   const [tags, setTags] = useState((device.tags ?? []).join(', '))
   const [metadata, setMetadata] = useState(JSON.stringify(device.metadata ?? {}, null, 2))
   const qc = useQueryClient()
+  const { success, error: toastError } = useToast()
 
   const save = useMutation({
     mutationFn: (payload: any) => fetchApi(`/api/devices/${device.id}`, { method: 'PUT', body: JSON.stringify(payload) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['devices'] })
+      success('设备配置已保存')
       onChanged()
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '操作失败'),
   })
 
   return (
@@ -544,7 +569,7 @@ const DeviceGeneralTab: React.FC<{ device: Device; onChanged: () => void }> = ({
             try {
               parsed = JSON.parse(metadata || '{}')
             } catch {
-              alert('Metadata JSON 格式错误')
+              toastError('Metadata JSON 格式错误')
               return
             }
             save.mutate({
@@ -568,6 +593,7 @@ const DeviceCredentialsTab: React.FC<{ device: Device }> = ({ device }) => {
   const [confirmReset, setConfirmReset] = useState(false)
   const [newSecret, setNewSecret] = useState('')
   const qc = useQueryClient()
+  const { success, error: toastError } = useToast()
 
   const reset = useMutation({
     mutationFn: () => fetchApi<{ secret: string }>(`/api/devices/${device.id}/secret`, { method: 'POST' }),
@@ -575,8 +601,9 @@ const DeviceCredentialsTab: React.FC<{ device: Device }> = ({ device }) => {
       setNewSecret(res.secret)
       setConfirmReset(false)
       qc.invalidateQueries({ queryKey: ['devices'] })
+      success('密钥已重置')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '操作失败'),
   })
 
   const mqttCommand = `mosquitto_sub -h localhost -p 1883 -u "${clientId}" -P "${newSecret || secret}" -t "channels/<channel_id>/messages"`
@@ -696,6 +723,7 @@ const DeviceTelemetryTab: React.FC<{ device: Device; channels?: Channel[] }> = (
 
   const activeChannel = channelId || bound[0]?.id || ''
 
+  const { success, error: toastError } = useToast()
   const send = useMutation({
     mutationFn: () =>
       fetchApi<MessageRecord>(`/api/channels/${activeChannel}/messages`, {
@@ -708,8 +736,11 @@ const DeviceTelemetryTab: React.FC<{ device: Device; channels?: Channel[] }> = (
           name: subtopic,
         }),
       }),
-    onSuccess: (m) => setSent(m),
-    onError: (e: any) => alert(e.message),
+    onSuccess: (m) => {
+      setSent(m)
+      success('遥测数据上报成功')
+    },
+    onError: (e: any) => toastError(e.message || '发送失败'),
   })
 
   const historyQuery = useQuery({

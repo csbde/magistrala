@@ -21,13 +21,14 @@ import {
   UserCheck,
   RotateCcw,
   History,
-  
 } from 'lucide-react'
+import { useToast } from '../components/ui/Toast'
 
 export const AlarmsModule: React.FC = () => {
   const { currentWorkspace, language } = useAuthStore()
   const t = dict[language]
   const qc = useQueryClient()
+  const { success, error: toastError } = useToast()
 
   const [statusTab, setStatusTab] = useState<'all' | 'active' | 'acknowledged' | 'resolved'>('all')
   const [severityFilter, setSeverityFilter] = useState('')
@@ -63,11 +64,18 @@ export const AlarmsModule: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({ action, assignee_id }),
       }),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       qc.invalidateQueries({ queryKey: wsKey })
       setAssignAlarm(null)
+      const actionLabels: Record<string, string> = {
+        ack: '告警已确认',
+        resolve: '告警已解决',
+        reopen: '告警已重新激活',
+        assign: '负责人已指派',
+      }
+      success(actionLabels[variables.action] || '操作成功')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '操作失败'),
   })
 
   const createMutation = useMutation({
@@ -77,11 +85,12 @@ export const AlarmsModule: React.FC = () => {
       qc.invalidateQueries({ queryKey: wsKey })
       setCreateOpen(false)
       setForm({ title: '', summary: '', severity: 'critical', device_id: '' })
+      success('手动告警已触发')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '触发告警失败'),
   })
 
-  const alarms = data?.items ?? []
+  const alarms = useMemo(() => data?.items ?? [], [data])
 
   const counts = useMemo(() => {
     return {
@@ -120,7 +129,7 @@ export const AlarmsModule: React.FC = () => {
             <option value="medium">中度 (Medium)</option>
             <option value="low">轻微 (Low)</option>
           </Select>
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button onClick={() => setCreateOpen(true)} className="flex items-center gap-1.5">
             <Plus className="w-4 h-4" />
             <span>手动触发告警</span>
           </Button>
@@ -144,20 +153,20 @@ export const AlarmsModule: React.FC = () => {
             statusTab === 'active' ? 'border-red-500 ring-2 ring-red-100' : 'border-slate-200'
           }`}
         >
-          <div className="text-xs text-red-600 flex items-center justify-between">
-            <span>未处理告警</span>
-            <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-bold">待响应</span>
+          <div className="text-xs text-red-600 font-semibold flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+            <span>未处理 (Active)</span>
           </div>
           <div className="text-2xl font-bold text-red-600 mt-1">{counts.active}</div>
         </div>
         <div
           onClick={() => setStatusTab('acknowledged')}
           className={`p-4 rounded-xl border bg-white cursor-pointer transition shadow-sm ${
-            statusTab === 'acknowledged' ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'
+            statusTab === 'acknowledged' ? 'border-amber-500 ring-2 ring-amber-100' : 'border-slate-200'
           }`}
         >
-          <div className="text-xs text-blue-600">处理中 (已确认)</div>
-          <div className="text-2xl font-bold text-blue-600 mt-1">{counts.acknowledged}</div>
+          <div className="text-xs text-amber-600 font-semibold">处理中 (Acknowledged)</div>
+          <div className="text-2xl font-bold text-amber-600 mt-1">{counts.acknowledged}</div>
         </div>
         <div
           onClick={() => setStatusTab('resolved')}
@@ -165,7 +174,7 @@ export const AlarmsModule: React.FC = () => {
             statusTab === 'resolved' ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200'
           }`}
         >
-          <div className="text-xs text-emerald-600">已解决闭环</div>
+          <div className="text-xs text-emerald-600 font-semibold">已解决闭环</div>
           <div className="text-2xl font-bold text-emerald-600 mt-1">{counts.resolved}</div>
         </div>
       </div>
@@ -182,10 +191,10 @@ export const AlarmsModule: React.FC = () => {
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs font-semibold uppercase tracking-wider">
                 <th className="py-3 px-4">告警摘要</th>
                 <th className="py-3 px-4">等级</th>
-                <th className="py-3 px-4">{t.status}</th>
+                <th className="py-3 px-4">状态</th>
                 <th className="py-3 px-4">关联设备</th>
                 <th className="py-3 px-4">负责人</th>
-                <th className="py-3 px-4">发生时间</th>
+                <th className="py-3 px-4">触发时间</th>
                 <th className="py-3 px-4 text-right">{t.actions}</th>
               </tr>
             </thead>
@@ -194,14 +203,12 @@ export const AlarmsModule: React.FC = () => {
                 <tr key={a.id} className="hover:bg-slate-50/60 transition">
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2">
-                      <BellRing
-                        className={`w-4 h-4 shrink-0 ${
-                          a.severity === 'critical' ? 'text-red-500' : a.severity === 'high' ? 'text-orange-500' : 'text-amber-500'
-                        }`}
-                      />
+                      <BellRing className={`w-4 h-4 shrink-0 ${a.status === 'active' ? 'text-red-500' : 'text-slate-400'}`} />
                       <div>
                         <div className="font-medium text-slate-800">{a.summary}</div>
-                        {a.title && <div className="text-xs text-slate-500">{a.title}</div>}
+                        {a.title && a.title !== a.summary && (
+                          <div className="text-[11px] text-slate-400">{a.title}</div>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -212,16 +219,19 @@ export const AlarmsModule: React.FC = () => {
                     <StatusBadge status={a.status} />
                   </td>
                   <td className="py-3 px-4 font-mono text-xs text-slate-500">
-                    {a.device_id || '系统规则'}
+                    {a.device_id || '-'}
                   </td>
                   <td className="py-3 px-4 text-xs text-slate-600">
                     {a.assignee_id ? (
-                      <span className="font-medium text-blue-600">{a.assignee_id}</span>
+                      <span className="inline-flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-medium">
+                        <UserCheck className="w-3 h-3 text-blue-500" />
+                        {a.assignee_id}
+                      </span>
                     ) : (
                       <span className="text-slate-400">未指派</span>
                     )}
                   </td>
-                  <td className="py-3 px-4 text-xs text-slate-500">
+                  <td className="py-3 px-4 text-xs text-slate-400 whitespace-nowrap">
                     {new Date(a.created_at).toLocaleString()}
                   </td>
                   <td className="py-3 px-4 text-right">
@@ -230,11 +240,11 @@ export const AlarmsModule: React.FC = () => {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => actionMutation.mutate({ id: a.id, action: 'acknowledge' })}
-                          title="确认接单 (Acknowledge)"
+                          onClick={() => actionMutation.mutate({ id: a.id, action: 'ack' })}
+                          title="接单确认"
                         >
-                          <Clock className="w-3.5 h-3.5 text-blue-600" />
-                          <span className="text-xs text-blue-600">确认</span>
+                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                          <span className="text-xs text-amber-700">确认</span>
                         </Button>
                       )}
 
@@ -243,10 +253,10 @@ export const AlarmsModule: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => actionMutation.mutate({ id: a.id, action: 'resolve' })}
-                          title="标记解决 (Resolve)"
+                          title="标记为已解决"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="text-xs text-emerald-600">解决</span>
+                          <span className="text-xs text-emerald-700">解决</span>
                         </Button>
                       )}
 
@@ -255,22 +265,14 @@ export const AlarmsModule: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => actionMutation.mutate({ id: a.id, action: 'reopen' })}
-                          title="重新激活 (Reopen)"
+                          title="重新激活告警"
                         >
-                          <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-                          <span className="text-xs text-amber-600">重开</span>
+                          <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="text-xs text-blue-700">重开</span>
                         </Button>
                       )}
 
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setAssigneeId(a.assignee_id || '')
-                          setAssignAlarm(a)
-                        }}
-                        title="指派负责人"
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => setAssignAlarm(a)} title="指派处理人">
                         <UserCheck className="w-3.5 h-3.5 text-slate-600" />
                       </Button>
 
@@ -362,6 +364,7 @@ export const AlarmsModule: React.FC = () => {
             <Button variant="outline" onClick={() => setAssignAlarm(null)}>{t.cancel}</Button>
             <Button
               disabled={!assigneeId}
+              loading={actionMutation.isPending}
               onClick={() => {
                 if (assignAlarm && assigneeId) {
                   actionMutation.mutate({ id: assignAlarm.id, action: 'assign', assignee_id: assigneeId })

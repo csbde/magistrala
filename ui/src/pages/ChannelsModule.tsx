@@ -29,6 +29,8 @@ import {
   Settings,
   Search,
 } from 'lucide-react'
+import { useToast } from '../components/ui/Toast'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 
 type TabId = 'general' | 'devices' | 'simulator'
 
@@ -36,6 +38,7 @@ export const ChannelsModule: React.FC = () => {
   const { currentWorkspace, language } = useAuthStore()
   const t = dict[language]
   const qc = useQueryClient()
+  const { success, error: toastError } = useToast()
 
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
@@ -43,6 +46,7 @@ export const ChannelsModule: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('general')
   const [connectOpen, setConnectOpen] = useState(false)
   const [selectedDevId, setSelectedDevId] = useState('')
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     name: '',
@@ -76,14 +80,22 @@ export const ChannelsModule: React.FC = () => {
       qc.invalidateQueries({ queryKey: wsKey })
       setCreateOpen(false)
       setForm({ name: '', metadata: '{\n  "protocol": "mqtt"\n}', status: 'enabled' })
+      success('通信通道创建成功')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '创建通道失败'),
   })
 
   const deleteChan = useMutation({
     mutationFn: (id: string) => fetchApi(`/api/channels/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: wsKey }),
-    onError: (e: any) => alert(e.message),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: wsKey })
+      setDeleteTargetId(null)
+      if (detailChannel?.id === deleteTargetId) {
+        setDetailChannel(null)
+      }
+      success('通道已删除')
+    },
+    onError: (e: any) => toastError(e.message || '删除通道失败'),
   })
 
   const connectDevice = useMutation({
@@ -93,15 +105,19 @@ export const ChannelsModule: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['channel-devices', detailChannel?.id] })
       setConnectOpen(false)
       setSelectedDevId('')
+      success('设备已成功接入通道')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '设备接入失败'),
   })
 
   const disconnectDevice = useMutation({
     mutationFn: (devId: string) =>
       fetchApi(`/api/devices/${devId}/channels/${detailChannel!.id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['channel-devices', detailChannel?.id] }),
-    onError: (e: any) => alert(e.message),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['channel-devices', detailChannel?.id] })
+      success('已解除设备与通道的连接')
+    },
+    onError: (e: any) => toastError(e.message || '解除连接失败'),
   })
 
   const channels = data?.items ?? []
@@ -143,7 +159,7 @@ export const ChannelsModule: React.FC = () => {
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-3.5 h-3.5" />
           </Button>
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button onClick={() => setCreateOpen(true)} className="flex items-center gap-1.5">
             <Plus className="w-4 h-4" />
             <span>新建通道</span>
           </Button>
@@ -161,9 +177,9 @@ export const ChannelsModule: React.FC = () => {
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs font-semibold uppercase tracking-wider">
                 <th className="py-3 px-4">通道名称</th>
                 <th className="py-3 px-4">通道 ID</th>
-                <th className="py-3 px-4">MQTT 消息主题</th>
-                <th className="py-3 px-4">{t.status}</th>
+                <th className="py-3 px-4">MQTT 默认订阅主题</th>
                 <th className="py-3 px-4">创建时间</th>
+                <th className="py-3 px-4">{t.status}</th>
                 <th className="py-3 px-4 text-right">{t.actions}</th>
               </tr>
             </thead>
@@ -172,7 +188,7 @@ export const ChannelsModule: React.FC = () => {
                 <tr key={c.id} className="hover:bg-slate-50/60 transition">
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2">
-                      <Radio className="w-4 h-4 text-blue-500" />
+                      <Radio className="w-4 h-4 text-indigo-500" />
                       <button
                         onClick={() => {
                           setDetailChannel(c)
@@ -190,17 +206,17 @@ export const ChannelsModule: React.FC = () => {
                       <CopyButton text={c.id} label="" />
                     </div>
                   </td>
-                  <td className="py-3 px-4">
-                    <div className="flex items-center gap-1.5 font-mono text-[11px] text-slate-600">
+                  <td className="py-3 px-4 font-mono text-xs text-blue-600">
+                    <div className="flex items-center gap-1.5">
                       <span>channels/{c.id}/messages</span>
                       <CopyButton text={`channels/${c.id}/messages`} label="" />
                     </div>
                   </td>
+                  <td className="py-3 px-4 text-xs text-slate-400">
+                    {new Date(c.created_at).toLocaleString()}
+                  </td>
                   <td className="py-3 px-4">
                     <StatusBadge status={c.status} />
-                  </td>
-                  <td className="py-3 px-4 text-xs text-slate-500">
-                    {new Date(c.created_at).toLocaleString()}
                   </td>
                   <td className="py-3 px-4 text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -209,29 +225,27 @@ export const ChannelsModule: React.FC = () => {
                         size="sm"
                         onClick={() => {
                           setDetailChannel(c)
-                          setActiveTab('simulator')
+                          setActiveTab('general')
                         }}
-                        title="打开消息测试台"
+                        title="查看通道详情"
                       >
-                        <Activity className="w-3.5 h-3.5 text-blue-600" />
+                        <Settings className="w-3.5 h-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => {
                           setDetailChannel(c)
-                          setActiveTab('devices')
+                          setActiveTab('simulator')
                         }}
-                        title="查看接入设备"
+                        title="消息测试台"
                       >
-                        <Cpu className="w-3.5 h-3.5" />
+                        <Activity className="w-3.5 h-3.5 text-blue-600" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => {
-                          if (confirm(t.confirmDelete)) deleteChan.mutate(c.id)
-                        }}
+                        onClick={() => setDeleteTargetId(c.id)}
                         title={t.delete}
                       >
                         <Trash2 className="w-3.5 h-3.5 text-red-500" />
@@ -245,31 +259,40 @@ export const ChannelsModule: React.FC = () => {
         )}
       </div>
 
-      {/* Create Dialog */}
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title="新建通信通道">
+      {/* Create Modal */}
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title="新建通信通道 (Channel)">
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            let metadata = {}
+            let metadata: Record<string, any> = {}
             try {
               metadata = form.metadata ? JSON.parse(form.metadata) : {}
             } catch {
-              alert('Metadata 必须是合法的 JSON 格式')
+              toastError('Metadata 必须是合法的 JSON 格式')
               return
             }
-            create.mutate({ name: form.name, status: form.status, metadata })
+            create.mutate({
+              name: form.name,
+              status: form.status,
+              metadata,
+            })
           }}
           className="space-y-4"
         >
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">通道名称 *</label>
-            <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="例如：车间环境监控数据通道" />
+            <Input
+              required
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="例如：厂区环境监测数据流通道"
+            />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">{t.status}</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">状态</label>
             <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-              <option value="enabled">启用</option>
-              <option value="disabled">停用</option>
+              <option value="enabled">启用 (Enabled)</option>
+              <option value="disabled">停用 (Disabled)</option>
             </Select>
           </div>
           <div>
@@ -277,8 +300,12 @@ export const ChannelsModule: React.FC = () => {
             <Textarea rows={4} value={form.metadata} onChange={(e) => setForm({ ...form, metadata: e.target.value })} />
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>{t.cancel}</Button>
-            <Button type="submit" loading={create.isPending}>{t.save}</Button>
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+              {t.cancel}
+            </Button>
+            <Button type="submit" loading={create.isPending}>
+              {t.save}
+            </Button>
           </div>
         </form>
       </Dialog>
@@ -287,7 +314,7 @@ export const ChannelsModule: React.FC = () => {
       <Dialog
         open={!!detailChannel}
         onClose={() => setDetailChannel(null)}
-        title={detailChannel ? `通道详情 · ${detailChannel.name}` : ''}
+        title={detailChannel ? `通道 · ${detailChannel.name}` : ''}
         description={detailChannel ? `ID: ${detailChannel.id}` : ''}
         width="max-w-3xl"
       >
@@ -299,52 +326,73 @@ export const ChannelsModule: React.FC = () => {
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
                   <Field label="通道 ID" value={detailChannel.id} mono />
-                  <Field label="状态" value={detailChannel.status} />
-                  <Field label="MQTT 默认主题" value={`channels/${detailChannel.id}/messages`} mono />
+                  <Field label="所属工作空间" value={detailChannel.workspace_id} mono />
                   <Field label="创建时间" value={new Date(detailChannel.created_at).toLocaleString()} />
+                  <Field label="状态">
+                    <StatusBadge status={detailChannel.status} />
+                  </Field>
                 </div>
-                <Field label="Metadata">
-                  <pre className="p-3 bg-slate-900 text-slate-200 font-mono text-xs rounded-lg overflow-x-auto">
-                    {JSON.stringify(detailChannel.metadata ?? {}, null, 2)}
+
+                <div className="p-4 bg-slate-900 text-slate-200 rounded-lg space-y-2">
+                  <div className="text-xs font-semibold text-slate-400">FluxMQ MQTT 通道订阅主题</div>
+                  <div className="flex items-center justify-between gap-2 bg-slate-950 p-2.5 rounded font-mono text-xs">
+                    <span className="text-emerald-400 select-all">channels/{detailChannel.id}/messages</span>
+                    <CopyButton text={`channels/${detailChannel.id}/messages`} />
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    带子主题格式: <code className="text-slate-400">channels/{detailChannel.id}/messages/&lt;subtopic&gt;</code>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Metadata (JSON)</label>
+                  <pre className="p-3 bg-slate-50 border border-slate-200 rounded-lg font-mono text-xs text-slate-700 overflow-x-auto">
+                    {JSON.stringify(detailChannel.metadata, null, 2)}
                   </pre>
-                </Field>
+                </div>
               </div>
             )}
 
             {activeTab === 'devices' && (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-xs text-slate-500">已连接 {boundDevices.length} 台设备</div>
-                  <Button size="sm" onClick={() => setConnectOpen(true)} disabled={unboundDevices.length === 0}>
-                    <Link2 className="w-3.5 h-3.5" />
-                    <span>添加设备连接</span>
+                  <div className="text-xs text-slate-500">
+                    当前通道已绑定 {boundDevices.length} 台设备
+                  </div>
+                  <Button size="sm" onClick={() => setConnectOpen(true)} disabled={unboundDevices.length === 0} className="flex items-center gap-1.5">
+                    <Link2 className="w-4 h-4" />
+                    <span>添加已注册设备</span>
                   </Button>
                 </div>
 
-                <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 overflow-hidden">
-                  {connectedDevicesQuery.isLoading && <div className="p-6 text-center text-xs text-slate-400">加载中...</div>}
-                  {!connectedDevicesQuery.isLoading && boundDevices.length === 0 && (
-                    <div className="p-6 text-center text-xs text-slate-400">暂无接入设备</div>
-                  )}
-                  {boundDevices.map((d) => (
-                    <div key={d.id} className="flex items-center justify-between p-3 hover:bg-slate-50">
-                      <div className="flex items-center gap-2.5">
-                        <Cpu className="w-4 h-4 text-slate-400" />
-                        <div>
-                          <div className="text-sm font-medium text-slate-800">{d.name}</div>
-                          <div className="text-[11px] font-mono text-slate-400">{d.id}</div>
+                {connectedDevicesQuery.isLoading ? (
+                  <EmptyState text="" loading />
+                ) : boundDevices.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                    暂无设备连接至该通道，点击上方「添加已注册设备」挂接
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 overflow-hidden">
+                    {boundDevices.map((d) => (
+                      <div key={d.id} className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
+                        <div className="flex items-center gap-2.5">
+                          {d.is_gateway ? <Cpu className="w-4 h-4 text-indigo-500" /> : <Radio className="w-4 h-4 text-slate-400" />}
+                          <div>
+                            <div className="text-sm font-medium text-slate-800">{d.name}</div>
+                            <div className="text-[11px] font-mono text-slate-400">{d.id}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <StatusBadge status={d.status} />
+                          <Button variant="outline" size="sm" onClick={() => disconnectDevice.mutate(d.id)}>
+                            <Unlink className="w-3.5 h-3.5" />
+                            <span>解绑</span>
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <StatusBadge status={d.status} />
-                        <Button variant="outline" size="sm" onClick={() => disconnectDevice.mutate(d.id)}>
-                          <Unlink className="w-3.5 h-3.5" />
-                          <span>解绑</span>
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -359,18 +407,26 @@ export const ChannelsModule: React.FC = () => {
       <Dialog
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
-        title={`向通道添加设备 · ${detailChannel?.name ?? ''}`}
+        title="关联设备至通道"
         footer={
           <>
-            <Button variant="outline" onClick={() => setConnectOpen(false)}>{t.cancel}</Button>
-            <Button disabled={!selectedDevId} onClick={() => selectedDevId && connectDevice.mutate(selectedDevId)}>确认添加</Button>
+            <Button variant="outline" onClick={() => setConnectOpen(false)}>
+              {t.cancel}
+            </Button>
+            <Button
+              disabled={!selectedDevId}
+              loading={connectDevice.isPending}
+              onClick={() => selectedDevId && connectDevice.mutate(selectedDevId)}
+            >
+              确认接入
+            </Button>
           </>
         }
       >
         <div className="space-y-3">
-          <div className="text-xs text-slate-500">选择要连接到该通道的设备：</div>
+          <div className="text-xs text-slate-500">选择要绑定至该通道的设备：</div>
           <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
-            {unboundDevices.length === 0 && <div className="p-6 text-center text-xs text-slate-400">所有设备均已连接</div>}
+            {unboundDevices.length === 0 && <div className="p-6 text-center text-xs text-slate-400">暂无待绑定的设备</div>}
             {unboundDevices.map((d) => (
               <label key={d.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 cursor-pointer">
                 <input
@@ -390,11 +446,23 @@ export const ChannelsModule: React.FC = () => {
           </div>
         </div>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTargetId}
+        title="确认删除通信通道"
+        message="删除通道将断开所有绑定设备的通讯路由，确定要删除吗？"
+        loading={deleteChan.isPending}
+        onConfirm={() => {
+          if (deleteTargetId) deleteChan.mutate(deleteTargetId)
+        }}
+        onClose={() => setDeleteTargetId(null)}
+      />
     </div>
   )
 }
 
 const ChannelSimulatorTab: React.FC<{ channel: Channel; boundDevices: Device[] }> = ({ channel, boundDevices }) => {
+  const { success, error: toastError } = useToast()
   const [publisher, setPublisher] = useState(boundDevices[0]?.id || 'simulator')
   const [subtopic, setSubtopic] = useState('telemetry')
   const [protocol, setProtocol] = useState('mqtt')
@@ -419,8 +487,11 @@ const ChannelSimulatorTab: React.FC<{ channel: Channel; boundDevices: Device[] }
           name: subtopic,
         }),
       }),
-    onSuccess: () => setRefreshTrigger((x) => x + 1),
-    onError: (e: any) => alert(e.message),
+    onSuccess: () => {
+      setRefreshTrigger((x) => x + 1)
+      success('模拟消息发布成功')
+    },
+    onError: (e: any) => toastError(e.message || '消息发送失败'),
   })
 
   return (

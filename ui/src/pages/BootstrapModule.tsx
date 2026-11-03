@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi } from '../lib/api'
 import { useAuthStore } from '../store/authStore'
 import { dict } from '../lib/i18n'
-import type { BootstrapProfile, BootstrapConfig, Channel, Page } from '../types'
+import type { BootstrapProfile, BootstrapConfig, Page } from '../types'
 import {
   Button,
   Dialog,
@@ -15,16 +15,21 @@ import {
   Badge,
   EmptyState,
 } from '../components/ui/primitives'
-import { Plus, Trash2, Cpu, Settings2 } from 'lucide-react'
+import { Plus, Trash2, Cpu, Settings2, KeyRound } from 'lucide-react'
+import { useToast } from '../components/ui/Toast'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 
 export const BootstrapModule: React.FC = () => {
   const { currentWorkspace, language } = useAuthStore()
   const t = dict[language]
   const qc = useQueryClient()
+  const { success, error: toastError } = useToast()
 
   const [activeTab, setActiveTab] = useState<'profiles' | 'configs'>('profiles')
   const [profileModal, setProfileModal] = useState(false)
   const [configModal, setConfigModal] = useState(false)
+  const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null)
+  const [deleteConfigId, setDeleteConfigId] = useState<string | null>(null)
 
   const [pForm, setPForm] = useState({
     name: '',
@@ -56,12 +61,6 @@ export const BootstrapModule: React.FC = () => {
     enabled: !!currentWorkspace?.id,
   })
 
-  const { data: _channelsData } = useQuery({
-    queryKey: ['channels', currentWorkspace?.id],
-    queryFn: () => fetchApi<Page<Channel>>('/api/channels?limit=500'),
-    enabled: !!currentWorkspace?.id,
-  })
-
   const createProfile = useMutation({
     mutationFn: (payload: any) =>
       fetchApi('/api/bootstraps/profiles', { method: 'POST', body: JSON.stringify(payload) }),
@@ -69,14 +68,19 @@ export const BootstrapModule: React.FC = () => {
       qc.invalidateQueries({ queryKey: [...wsKey, 'profiles'] })
       setProfileModal(false)
       setPForm({ name: '', channels: '', content: '{\n  "mqtt_broker": "localhost:1883",\n  "keepalive": 60\n}', encrypted: false })
+      success('引导方案创建成功')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '创建方案失败'),
   })
 
   const deleteProfile = useMutation({
     mutationFn: (id: string) => fetchApi(`/api/bootstraps/profiles/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [...wsKey, 'profiles'] }),
-    onError: (e: any) => alert(e.message),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [...wsKey, 'profiles'] })
+      setDeleteProfileId(null)
+      success('引导方案已删除')
+    },
+    onError: (e: any) => toastError(e.message || '删除方案失败'),
   })
 
   const createConfig = useMutation({
@@ -86,23 +90,27 @@ export const BootstrapModule: React.FC = () => {
       qc.invalidateQueries({ queryKey: [...wsKey, 'configs'] })
       setConfigModal(false)
       setCForm({ name: '', device_id: '', external_id: '', mac_address: '', profile_id: '', secure: false })
+      success('设备引导映射添加成功')
     },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toastError(e.message || '添加映射失败'),
   })
 
   const deleteConfig = useMutation({
     mutationFn: (id: string) => fetchApi(`/api/bootstraps/configs/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [...wsKey, 'configs'] }),
-    onError: (e: any) => alert(e.message),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [...wsKey, 'configs'] })
+      setDeleteConfigId(null)
+      success('设备引导映射已删除')
+    },
+    onError: (e: any) => toastError(e.message || '删除映射失败'),
   })
 
   const profiles = profilesQuery.data?.items ?? []
   const configs = configsQuery.data?.items ?? []
-  // const channels = channelsData?.items ?? []
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-800">{t.bootstraps}</h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -111,12 +119,12 @@ export const BootstrapModule: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           {activeTab === 'profiles' ? (
-            <Button onClick={() => setProfileModal(true)}>
+            <Button onClick={() => setProfileModal(true)} className="flex items-center gap-1.5">
               <Plus className="w-4 h-4" />
               <span>新建引导方案 (Profile)</span>
             </Button>
           ) : (
-            <Button onClick={() => setConfigModal(true)}>
+            <Button onClick={() => setConfigModal(true)} className="flex items-center gap-1.5">
               <Plus className="w-4 h-4" />
               <span>添加设备映射 (Config)</span>
             </Button>
@@ -138,57 +146,51 @@ export const BootstrapModule: React.FC = () => {
           {profilesQuery.isLoading ? (
             <EmptyState text="" loading />
           ) : profiles.length === 0 ? (
-            <EmptyState text="暂无引导方案" />
+            <EmptyState text="暂无引导方案，点击上方「新建引导方案」创建" />
           ) : (
             <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs font-semibold uppercase">
                   <th className="py-3 px-4">方案名称</th>
-                  <th className="py-3 px-4">关联通道</th>
+                  <th className="py-3 px-4">方案 ID</th>
+                  <th className="py-3 px-4">绑定通道</th>
                   <th className="py-3 px-4">加密状态</th>
-                  <th className="py-3 px-4">加密密钥</th>
                   <th className="py-3 px-4">创建时间</th>
                   <th className="py-3 px-4 text-right">{t.actions}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {profiles.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50/60">
-                    <td className="py-3 px-4">
-                      <div className="font-medium text-slate-800">{p.name}</div>
-                      <div className="text-[11px] font-mono text-slate-400">{p.id}</div>
-                    </td>
+                  <tr key={p.id} className="hover:bg-slate-50/60 transition">
+                    <td className="py-3 px-4 font-medium text-slate-800">{p.name}</td>
+                    <td className="py-3 px-4 font-mono text-xs text-slate-500">{p.id}</td>
                     <td className="py-3 px-4">
                       <div className="flex flex-wrap gap-1">
-                        {(p.channels ?? []).map((ch) => (
-                          <Badge key={ch}>{ch}</Badge>
+                        {(p.channels ?? []).map((c) => (
+                          <Badge key={c}>{c}</Badge>
                         ))}
                         {(!p.channels || p.channels.length === 0) && <span className="text-slate-400 text-xs">-</span>}
                       </div>
                     </td>
                     <td className="py-3 px-4">
                       {p.encrypted ? (
-                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">AES 加密</Badge>
+                        <span className="inline-flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          <KeyRound className="w-3 h-3" />
+                          <span>AES 密文</span>
+                        </span>
                       ) : (
-                        <Badge className="bg-slate-100 text-slate-600 border-slate-200">明文</Badge>
+                        <span className="text-xs text-slate-400">明文下发</span>
                       )}
                     </td>
-                    <td className="py-3 px-4 font-mono text-xs text-slate-600">
-                      {p.encryption_key || '-'}
-                    </td>
-                    <td className="py-3 px-4 text-xs text-slate-500">
-                      {new Date(p.created_at).toLocaleString()}
-                    </td>
+                    <td className="py-3 px-4 text-xs text-slate-400">{new Date(p.created_at).toLocaleString()}</td>
                     <td className="py-3 px-4 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          if (confirm(t.confirmDelete)) deleteProfile.mutate(p.id)
-                        }}
+                      <button
+                        onClick={() => setDeleteProfileId(p.id)}
+                        className="text-slate-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition"
+                        title={t.delete}
                       >
-                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                      </Button>
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -203,13 +205,13 @@ export const BootstrapModule: React.FC = () => {
           {configsQuery.isLoading ? (
             <EmptyState text="" loading />
           ) : configs.length === 0 ? (
-            <EmptyState text="暂无设备映射" />
+            <EmptyState text="暂无设备映射记录，点击上方「添加设备映射」挂接新设备识别码" />
           ) : (
             <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs font-semibold uppercase">
-                  <th className="py-3 px-4">配置映射名称</th>
-                  <th className="py-3 px-4">目标设备 ID</th>
+                  <th className="py-3 px-4">映射名称</th>
+                  <th className="py-3 px-4">设备 ID</th>
                   <th className="py-3 px-4">外部 ID / MAC</th>
                   <th className="py-3 px-4">关联方案 ID</th>
                   <th className="py-3 px-4">状态</th>
@@ -218,22 +220,25 @@ export const BootstrapModule: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {configs.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50/60">
+                  <tr key={c.id} className="hover:bg-slate-50/60 transition">
                     <td className="py-3 px-4 font-medium text-slate-800">{c.name}</td>
                     <td className="py-3 px-4 font-mono text-xs text-blue-600">{c.device_id}</td>
-                    <td className="py-3 px-4 font-mono text-xs text-slate-600">{c.external_id || c.mac_address || '-'}</td>
+                    <td className="py-3 px-4 font-mono text-xs text-slate-600">
+                      <div>{c.external_id || '-'}</div>
+                      {c.mac_address && <div className="text-[11px] text-slate-400">{c.mac_address}</div>}
+                    </td>
                     <td className="py-3 px-4 font-mono text-xs text-slate-500">{c.profile_id}</td>
-                    <td className="py-3 px-4"><StatusBadge status={c.status} /></td>
+                    <td className="py-3 px-4">
+                      <StatusBadge status={c.status} />
+                    </td>
                     <td className="py-3 px-4 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          if (confirm(t.confirmDelete)) deleteConfig.mutate(c.id)
-                        }}
+                      <button
+                        onClick={() => setDeleteConfigId(c.id)}
+                        className="text-slate-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition"
+                        title={t.delete}
                       >
-                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                      </Button>
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -336,6 +341,28 @@ export const BootstrapModule: React.FC = () => {
           </div>
         </form>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteProfileId}
+        title="确认删除引导方案"
+        message="删除该方案后，依赖此方案的新设备将无法获取初始配置，确定要删除吗？"
+        loading={deleteProfile.isPending}
+        onConfirm={() => {
+          if (deleteProfileId) deleteProfile.mutate(deleteProfileId)
+        }}
+        onClose={() => setDeleteProfileId(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteConfigId}
+        title="确认删除设备映射"
+        message="确定要删除该设备引导映射记录吗？"
+        loading={deleteConfig.isPending}
+        onConfirm={() => {
+          if (deleteConfigId) deleteConfig.mutate(deleteConfigId)
+        }}
+        onClose={() => setDeleteConfigId(null)}
+      />
     </div>
   )
 }

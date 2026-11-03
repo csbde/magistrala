@@ -4,6 +4,8 @@
 package api
 
 import (
+	"encoding/base64"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -758,6 +760,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg.CreatedAt = time.Now()
 	saved := s.store.SaveMessage(msg)
+	s.evaluateRules(msg.ChannelID, msg.Subtopic, msg.Publisher, msg.Payload)
 	renderJSON(w, http.StatusCreated, saved)
 }
 
@@ -1806,5 +1809,239 @@ func (s *Server) handleMQTTACL(w http.ResponseWriter, r *http.Request) {
 		"result":  "deny",
 		"code":    1,
 		"message": fmt.Sprintf("device %s is not connected to channel %s", devID, channelID),
+	})
+}
+
+type fluxMQHookRequest struct {
+	Hook       string `json:"hook"`
+	ClientID   string `json:"client_id"`
+	ExternalID string `json:"external_id"`
+	Protocol   string `json:"protocol"`
+	Topic      string `json:"topic"`
+	Payload    any    `json:"payload,omitempty"`
+	Username   string `json:"username,omitempty"`
+	Password   string `json:"password,omitempty"`
+}
+
+func (s *Server) handleFluxMQHooks(w http.ResponseWriter, r *http.Request) {
+	var req fluxMQHookRequest
+	if !decodeBody(w, r, &req) {
+		renderJSON(w, http.StatusOK, map[string]any{"result": "ok"})
+		return
+	}
+
+	devID := strings.TrimSpace(req.Username)
+	if devID == "" {
+		devID = strings.TrimSpace(req.ClientID)
+	}
+
+	topic := strings.TrimSpace(req.Topic)
+	parts := strings.Split(topic, "/")
+	if len(parts) >= 3 && parts[0] == "channels" && parts[2] == "messages" {
+		channelID := parts[1]
+		subtopic := ""
+		if len(parts) >= 4 {
+			subtopic = strings.Join(parts[3:], "/")
+		}
+
+		// If publishing, persist message into SQLite
+		if req.Hook == "auth_on_publish" {
+			var payloadStr string
+			switch p := req.Payload.(type) {
+			case string:
+				if decoded, err := base64.StdEncoding.DecodeString(p); err == nil && len(decoded) > 0 {
+					payloadStr = string(decoded)
+				} else {
+					payloadStr = p
+				}
+			case []byte:
+				if decoded, err := base64.StdEncoding.DecodeString(string(p)); err == nil && len(decoded) > 0 {
+					payloadStr = string(decoded)
+				} else {
+					payloadStr = string(p)
+				}
+			default:
+				if b, err := json.Marshal(p); err == nil {
+					payloadStr = string(b)
+				}
+			}
+
+			if payloadStr != "" {
+				s.store.SaveMessage(store.MessageRecord{
+					ID:        store.GenID("msg"),
+					ChannelID: channelID,
+					Subtopic:  subtopic,
+					Publisher: devID,
+					Protocol:  "mqtt",
+					Payload:   payloadStr,
+					Time:      time.Now().UnixNano(),
+					CreatedAt: time.Now(),
+				})
+				s.evaluateRules(channelID, subtopic, devID, payloadStr)
+			}
+		}
+	}
+
+	renderJSON(w, http.StatusOK, map[string]any{"result": "ok"})
+}
+
+func toFloat64(val any) (float64, bool) {
+	switch v := val.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case string:
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+func (s *Server) evaluateRules(channelID, subtopic, publisher, payloadStr string) {
+	rules := s.store.ListRules(store.QueryFilter{Limit: 200}).Items
+	for _, r := range rules {
+		if r.Status != "enabled" {
+			continue
+		}
+		if r.InputChannel != "" && r.InputChannel != channelID {
+			continue
+		}
+		if r.InputTopic != "" && r.InputTopic != "#" && !strings.Contains(subtopic, r.InputTopic) {
+			continue
+		}
+
+		// Threshold condition check
+		if field, ok := r.Logic["field"].(string); ok && field != "" {
+			var data map[string]any
+			if err := json.Unmarshal([]byte(payloadStr), &data); err == nil {
+				if val, exists := data[field]; exists {
+					op, _ := r.Logic["operator"].(string)
+					targetVal, okTarget := toFloat64(r.Logic["value"])
+					numVal, okNum := toFloat64(val)
+					if okNum && okTarget && op != "" {
+						matched := false
+						switch op {
+						case ">":
+							matched = numVal > targetVal
+						case ">=":
+							matched = numVal >= targetVal
+						case "<":
+							matched = numVal < targetVal
+						case "<=":
+							matched = numVal <= targetVal
+						case "==":
+							matched = numVal == targetVal
+						}
+						if !matched {
+							continue
+						}
+					}
+				} else {
+					continue
+				}
+			}
+		}
+
+		// Action 1: Webhook Push to External Platform
+		action, _ := r.Outputs["action"].(string)
+		if action == "webhook" {
+			webhookURL, _ := r.Outputs["url"].(string)
+			if webhookURL != "" {
+				go func(targetURL, pStr, ch, sub, pub, ruleName string) {
+					bodyMap := map[string]any{
+						"event":       "device_telemetry",
+						"rule_name":   ruleName,
+						"channel_id":  ch,
+						"subtopic":    sub,
+						"publisher":   pub,
+						"timestamp":   time.Now().Unix(),
+					}
+					var raw json.RawMessage
+					if err := json.Unmarshal([]byte(pStr), &raw); err == nil {
+						bodyMap["payload"] = raw
+					} else {
+						bodyMap["payload"] = pStr
+					}
+
+					bodyBytes, _ := json.Marshal(bodyMap)
+					req, err := http.NewRequest("POST", targetURL, bytes.NewReader(bodyBytes))
+					if err == nil {
+						req.Header.Set("Content-Type", "application/json")
+						client := &http.Client{Timeout: 5 * time.Second}
+						resp, err := client.Do(req)
+						if err == nil {
+							_ = resp.Body.Close()
+						}
+					}
+				}(webhookURL, payloadStr, channelID, subtopic, publisher, r.Name)
+			}
+		}
+
+		// Action 2: Trigger Alarm
+		if action == "alarm" {
+			sev := "high"
+			if sVal, ok := r.Outputs["severity"].(string); ok && sVal != "" {
+				sev = sVal
+			}
+			s.store.SaveAlarm(store.Alarm{
+				ID:          store.GenID("alarm"),
+				WorkspaceID: r.WorkspaceID,
+				DeviceID:    publisher,
+				RuleID:      r.ID,
+				Severity:    sev,
+				Title:       fmt.Sprintf("规则告警 · %s", r.Name),
+				Summary:     fmt.Sprintf("通道 [%s] 命中规则 [%s], 监测到设备 %s 异常数据: %s", channelID, r.Name, publisher, payloadStr),
+				Status:      "active",
+				History:     []string{fmt.Sprintf("%s 规则引擎命中自动生成告警", time.Now().Format(time.RFC3339))},
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+			})
+		}
+	}
+}
+
+func (s *Server) handleListAllMessages(w http.ResponseWriter, r *http.Request) {
+	chanID := r.URL.Query().Get("channel_id")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 100
+	}
+	renderJSON(w, http.StatusOK, s.store.ListMessages(chanID, limit))
+}
+
+type updateProfileRequest struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password,omitempty"`
+}
+
+func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	claims := ctxUser(r)
+	if claims == nil || claims.UserID == "" {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	var req updateProfileRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+
+	updated, err := s.store.UpdateProfile(claims.UserID, req.Name, req.Email, req.Password)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	s.journal(r, updated.ID, "user", "update_profile", map[string]any{"email": updated.Email})
+	renderJSON(w, http.StatusOK, map[string]any{
+		"message": "个人资料更新成功",
+		"user":    updated,
 	})
 }

@@ -32,3 +32,5 @@ node_modules
 # Local SQLite runtime data
 data/
 *.db
+logs/
+*.log

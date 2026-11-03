@@ -411,6 +411,7 @@ type Storage interface {
 	GetUser(id string) (User, error)
 	GetUserByEmail(email string) (User, bool)
 	SaveUser(u User) User
+	UpdateProfile(id, name, email, password string) (User, error)
 	DeleteUser(id string)
 
 	// PATs

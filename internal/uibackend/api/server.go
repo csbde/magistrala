@@ -87,6 +87,10 @@ func (s *Server) setupRoutes() {
 		MaxAge:           300,
 	}))
 
+	// FluxMQ Hook endpoint
+	r.Post("/hooks", s.handleFluxMQHooks)
+	r.Post("/hooks/*", s.handleFluxMQHooks)
+
 	// API Routes
 	r.Route("/api", func(api chi.Router) {
 		// Health & Version Info
@@ -102,6 +106,7 @@ func (s *Server) setupRoutes() {
 		// FluxMQ / MQTT Auth webhook endpoints (for external Broker authentication)
 		api.Post("/auth/mqtt", s.handleMQTTAuth)
 		api.Post("/auth/mqtt/acl", s.handleMQTTACL)
+		api.Post("/hooks", s.handleFluxMQHooks)
 
 		// Auth & OIDC
 		api.Post("/auth/login", s.handlePasswordLogin)
@@ -114,6 +119,7 @@ func (s *Server) setupRoutes() {
 			auth.Use(s.authMiddleware)
 
 			auth.Get("/auth/me", s.handleGetMe)
+			auth.Put("/auth/profile", s.handleUpdateProfile)
 			auth.Post("/auth/switch-workspace", s.handleSwitchWorkspace)
 
 			// Workspaces (Tenants)
@@ -153,6 +159,7 @@ func (s *Server) setupRoutes() {
 				scoped.Get("/channels/{id}/devices", s.handleListChannelDevices)
 
 				// Messages & Live Console
+				scoped.Get("/messages", s.handleListAllMessages)
 				scoped.Get("/channels/{id}/messages", s.handleListMessages)
 				scoped.Post("/channels/{id}/messages", s.handleSendMessage)
 

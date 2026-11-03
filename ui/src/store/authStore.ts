@@ -13,6 +13,7 @@ interface AuthState {
   setCurrentWorkspace: (workspace: Workspace) => void
   setToken: (token: string) => void
   setLanguage: (lang: 'zh' | 'en') => void
+  updateUser: (user: User) => void
   logout: () => void
 }
 
@@ -20,7 +21,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   token: localStorage.getItem('mg_token'),
   user: localStorage.getItem('mg_user') ? JSON.parse(localStorage.getItem('mg_user')!) : null,
   currentWorkspace: localStorage.getItem('mg_workspace') ? JSON.parse(localStorage.getItem('mg_workspace')!) : null,
-  workspaces: [],
+  workspaces: localStorage.getItem('mg_workspaces') ? JSON.parse(localStorage.getItem('mg_workspaces')!) : [],
   roles: ['role:admin'],
   language: (localStorage.getItem('mg_lang') as 'zh' | 'en') || 'zh',
 
@@ -31,6 +32,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (current) {
       localStorage.setItem('mg_workspace', JSON.stringify(current))
     }
+    localStorage.setItem('mg_workspaces', JSON.stringify(workspaces))
     set({
       token,
       user,
@@ -54,15 +56,21 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ language: lang })
   },
 
+  updateUser: (user) => {
+    localStorage.setItem('mg_user', JSON.stringify(user))
+    set({ user })
+  },
+
   logout: () => {
     localStorage.removeItem('mg_token')
     localStorage.removeItem('mg_user')
     localStorage.removeItem('mg_workspace')
+    localStorage.removeItem('mg_workspaces')
     set({
       token: null,
       user: null,
       currentWorkspace: null,
-      workspaces: [],
+      workspaces: localStorage.getItem('mg_workspaces') ? JSON.parse(localStorage.getItem('mg_workspaces')!) : [],
       roles: [],
     })
   },

@@ -133,6 +133,21 @@ Magistrala provides a complete set of building blocks for IoT systems — from d
 
 ---
 
+## FluxMQ Broker & Multi-Protocol Connectivity
+
+For standalone installation, cluster configuration, and multi-protocol device integration (MQTT, WebSocket, CoAP, HTTP), refer to the comprehensive guide:
+
+👉 **[FluxMQ 部署、配置与设备连接接入完整指南](docs/FLUXMQ_GUIDE.md)**
+
+It covers:
+- System architecture & communication topology
+- Docker Compose & standalone binary deployments
+- Configuration details (`node.yaml`, Webhook authentication & ACL)
+- Device connection commands (`mosquitto_sub/pub`, WebSocket, HTTP, CoAP)
+- Troubleshooting & connection error codes
+
+---
+
 ## Installation
 
 A fresh clone carries no generated secrets. Two sets have to exist before the

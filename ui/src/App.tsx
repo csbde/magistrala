@@ -11,7 +11,10 @@ import { AlarmsModule } from './pages/AlarmsModule'
 import { BootstrapModule } from './pages/BootstrapModule'
 import { BrokerHubModule } from './pages/BrokerHubModule'
 import { UsersModule } from './pages/UsersModule'
+import { MessagesModule } from './pages/MessagesModule'
+import { RulesModule } from './pages/RulesModule'
 import { CrudModule } from './pages/CrudModule'
+import { ToastProvider } from './components/ui/Toast'
 import { fetchApi } from './lib/api'
 
 const queryClient = new QueryClient({
@@ -105,23 +108,8 @@ export const AppContent: React.FC = () => {
         />
       )}
 
-      {currentTab === 'rules' && (
-        <CrudModule
-          endpoint="/api/rules"
-          title="规则引擎 (Rules)"
-          columns={[
-            { key: 'name', label: '规则名称' },
-            { key: 'input_channel', label: '绑定通道 ID' },
-            { key: 'input_topic', label: '匹配主题 (Topic)' },
-            { key: 'status', label: '状态' },
-          ]}
-          createFields={[
-            { name: 'name', label: '规则名称', placeholder: '例如：温度阈值联动规则' },
-            { name: 'input_channel', label: '输入通道 ID', placeholder: 'chan-xxx' },
-            { name: 'input_topic', label: '输入子主题', placeholder: 'temperature' },
-          ]}
-        />
-      )}
+      {currentTab === 'messages' && <MessagesModule />}
+      {currentTab === 'rules' && <RulesModule />}
 
       {currentTab === 'pats' && (
         <CrudModule
@@ -149,7 +137,9 @@ export const AppContent: React.FC = () => {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </QueryClientProvider>
   )
 }

@@ -300,6 +300,7 @@ type userRow struct {
 	Role      string  `gorm:"size:64;default:'user'"`
 	Status    string  `gorm:"size:32;default:'enabled'"`
 	Profile   JSONMap `gorm:"type:text"`
+	Password  string  `gorm:"size:255"`
 	Verified  bool    `gorm:"default:false"`
 	CreatedAt time.Time
 	UpdatedAt time.Time

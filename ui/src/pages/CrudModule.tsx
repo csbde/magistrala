@@ -4,6 +4,9 @@ import { fetchApi } from '../lib/api'
 import { useAuthStore } from '../store/authStore'
 import { dict } from '../lib/i18n'
 import { Plus, Trash2, ShieldAlert } from 'lucide-react'
+import { useToast } from '../components/ui/Toast'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { EmptyState, Button } from '../components/ui/primitives'
 
 interface CrudModuleProps {
   endpoint: string
@@ -21,10 +24,12 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
   const { currentWorkspace, language } = useAuthStore()
   const t = dict[language]
   const queryClient = useQueryClient()
+  const { success, error: toastError } = useToast()
 
   const [isOpen, setIsOpen] = useState(false)
   const [formData, setFormData] = useState<Record<string, string>>({})
   const [errorMsg, setErrorMsg] = useState('')
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
 
   const queryKey = [endpoint, currentWorkspace?.id]
 
@@ -46,9 +51,11 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
       setIsOpen(false)
       setFormData({})
       setErrorMsg('')
+      success('创建成功')
     },
     onError: (err: any) => {
       setErrorMsg(err.message || '操作失败')
+      toastError(err.message || '操作失败')
     },
   })
 
@@ -59,9 +66,11 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey })
+      setDeleteTargetId(null)
+      success('删除成功')
     },
     onError: (err: any) => {
-      alert(err.message || '删除失败')
+      toastError(err.message || '删除失败')
     },
   })
 
@@ -80,16 +89,16 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
             租户内资源，受 Casbin 细粒度权限保护与租户隔离
           </p>
         </div>
-        <button
+        <Button
           onClick={() => {
             setErrorMsg('')
             setIsOpen(true)
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg shadow-sm transition"
+          className="flex items-center gap-1.5"
         >
           <Plus className="w-4 h-4" />
           <span>{t.create}</span>
-        </button>
+        </Button>
       </div>
 
       {/* Modal */}
@@ -125,20 +134,19 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
               ))}
 
               <div className="flex justify-end gap-2 pt-2">
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={() => setIsOpen(false)}
-                  className="px-3 py-1.5 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50"
                 >
                   {t.cancel}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  disabled={createMutation.isPending}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                  loading={createMutation.isPending}
                 >
-                  {createMutation.isPending ? t.loading : t.save}
-                </button>
+                  {t.save}
+                </Button>
               </div>
             </form>
           </div>
@@ -148,13 +156,13 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
       {/* Data Table */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         {isLoading ? (
-          <div className="p-12 text-center text-slate-400 text-sm">{t.loading}</div>
+          <EmptyState text="" loading />
         ) : error ? (
           <div className="p-8 text-center text-red-500 text-sm">
             {(error as any).message}
           </div>
         ) : data.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 text-sm">{t.noData}</div>
+          <EmptyState text={t.noData} />
         ) : (
           <table className="w-full text-left border-collapse text-sm">
             <thead>
@@ -177,12 +185,8 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
                   ))}
                   <td className="py-3 px-4 text-right">
                     <button
-                      onClick={() => {
-                        if (confirm(t.confirmDelete)) {
-                          deleteMutation.mutate(row.id)
-                        }
-                      }}
-                      className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50"
+                      onClick={() => setDeleteTargetId(row.id)}
+                      className="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-red-50 transition"
                       title={t.delete}
                     >
                       <Trash2 className="w-4 h-4" />
@@ -194,6 +198,17 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
           </table>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTargetId}
+        title="确认删除"
+        message={t.confirmDelete}
+        loading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleteTargetId) deleteMutation.mutate(deleteTargetId)
+        }}
+        onClose={() => setDeleteTargetId(null)}
+      />
     </div>
   )
 }

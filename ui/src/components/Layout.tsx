@@ -10,6 +10,7 @@ import {
   FolderGit2,
   Workflow,
   BellRing,
+  Database,
   Settings2,
   Users,
   Key,
@@ -18,7 +19,11 @@ import {
   Languages,
   ShieldCheck,
   ChevronDown,
+  UserCog,
 } from 'lucide-react'
+import { Dialog, Input, Button } from './ui/primitives'
+import { useToast } from './ui/Toast'
+import { fetchApi } from '../lib/api'
 
 interface LayoutProps {
   currentTab: string
@@ -30,6 +35,45 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
   const { user, currentWorkspace, workspaces, setCurrentWorkspace, logout, language, setLanguage } = useAuthStore()
   const t = dict[language]
   const [switching, setSwitching] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [profileName, setProfileName] = useState(user?.name || '')
+  const [profileEmail, setProfileEmail] = useState(user?.email || '')
+  const [profilePassword, setProfilePassword] = useState('')
+  const [profileConfirmPassword, setProfileConfirmPassword] = useState('')
+  const [profileLoading, setProfileLoading] = useState(false)
+  const { updateUser } = useAuthStore()
+  const { success, error: toastError } = useToast()
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (profilePassword && profilePassword !== profileConfirmPassword) {
+      toastError('两次输入的新密码不一致')
+      return
+    }
+
+    setProfileLoading(true)
+    try {
+      const res = await fetchApi('/api/auth/profile', {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: profileName,
+          email: profileEmail,
+          password: profilePassword || undefined,
+        }),
+      })
+      if (res.user) {
+        updateUser(res.user)
+      }
+      setProfilePassword('')
+      setProfileConfirmPassword('')
+      setProfileOpen(false)
+      success('个人资料及密码更新成功')
+    } catch (err: any) {
+      toastError(err.message || '更新失败')
+    } finally {
+      setProfileLoading(false)
+    }
+  }
 
   const navSections = [
     {
@@ -51,6 +95,7 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
     {
       title: '数据与规则',
       items: [
+        { id: 'messages', label: '消息数据中心', icon: Database },
         { id: 'rules', label: t.rules, icon: Workflow },
         { id: 'alarms', label: t.alarms, icon: BellRing },
         { id: 'bootstraps', label: t.bootstraps, icon: Settings2 },
@@ -101,7 +146,9 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
               </button>
 
               {switching && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden py-1">
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSwitching(false)} />
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden py-1 max-h-60 overflow-y-auto">
                   {workspaces.map((w) => (
                     <button
                       key={w.id}
@@ -116,6 +163,7 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
                     </button>
                   ))}
                 </div>
+                </>
               )}
             </div>
           </div>
@@ -170,14 +218,39 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
             </button>
           </div>
 
-          <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
-            <div className="w-7 h-7 rounded-full bg-blue-500/20 text-blue-400 font-bold text-xs flex items-center justify-center border border-blue-500/30">
-              {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
+          <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+            <div
+              className="flex items-center gap-2 min-w-0 cursor-pointer hover:opacity-80 transition flex-1"
+              onClick={() => {
+                setProfileName(user?.name || '')
+                setProfileEmail(user?.email || '')
+                setProfilePassword('')
+                setProfileConfirmPassword('')
+                setProfileOpen(true)
+              }}
+              title="点击修改个人资料与密码"
+            >
+              <div className="w-7 h-7 rounded-full bg-blue-500/20 text-blue-400 font-bold text-xs flex items-center justify-center border border-blue-500/30 shrink-0">
+                {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
+              </div>
+              <div className="truncate text-xs">
+                <div className="text-slate-200 font-medium truncate">{user?.name || user?.email}</div>
+                <div className="text-slate-400 text-[10px] truncate">{user?.email}</div>
+              </div>
             </div>
-            <div className="truncate text-xs">
-              <div className="text-slate-200 font-medium truncate">{user?.name || user?.email}</div>
-              <div className="text-slate-400 text-[10px] truncate">{user?.email}</div>
-            </div>
+            <button
+              onClick={() => {
+                setProfileName(user?.name || '')
+                setProfileEmail(user?.email || '')
+                setProfilePassword('')
+                setProfileConfirmPassword('')
+                setProfileOpen(true)
+              }}
+              title="修改资料与密码"
+              className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition shrink-0 ml-1"
+            >
+              <UserCog className="w-4 h-4 text-blue-400" />
+            </button>
           </div>
         </div>
       </aside>
@@ -203,6 +276,64 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
 
         <div className="p-8 flex-1">{children}</div>
       </main>
+      {/* User Profile & Password Modal */}
+      <Dialog
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        title="个人资料与密码安全设置"
+        description="修改用户姓名、绑定电子邮箱及登录密码"
+      >
+        <form onSubmit={handleUpdateProfile} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">用户姓名 *</label>
+            <Input
+              required
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
+              placeholder="管理员姓名"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">电子邮箱 / 登录账号 *</label>
+            <Input
+              required
+              type="email"
+              value={profileEmail}
+              onChange={(e) => setProfileEmail(e.target.value)}
+              placeholder="admin@magistrala.local"
+            />
+          </div>
+          <div className="pt-2 border-t border-slate-200 space-y-3">
+            <div className="text-xs font-semibold text-slate-800">修改登录密码（不修改请留空）</div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">新密码</label>
+              <Input
+                type="password"
+                placeholder="留空则保持原密码不变"
+                value={profilePassword}
+                onChange={(e) => setProfilePassword(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">确认新密码</label>
+              <Input
+                type="password"
+                placeholder="请再次输入新密码"
+                value={profileConfirmPassword}
+                onChange={(e) => setProfileConfirmPassword(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={() => setProfileOpen(false)}>
+              取消
+            </Button>
+            <Button type="submit" loading={profileLoading}>
+              保存更改
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   )
 }

@@ -5,6 +5,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -1457,4 +1458,34 @@ func (s *DBStore) ListSupportTickets(userID string) []SupportTicket {
 		}
 	}
 	return items
+}
+
+func (s *DBStore) UpdateProfile(id, name, email, password string) (User, error) {
+	var r userRow
+	if err := s.db.First(&r, "id = ?", id).Error; err != nil {
+		return User{}, fmt.Errorf("user not found: %w", err)
+	}
+
+	if email != "" && email != r.Email {
+		var other userRow
+		if s.db.First(&other, "email = ? AND id != ?", email, id).Error == nil {
+			return User{}, fmt.Errorf("邮箱 %s 已被其他账号使用", email)
+		}
+		r.Email = strings.ToLower(strings.TrimSpace(email))
+	}
+
+	if name != "" {
+		r.Name = strings.TrimSpace(name)
+	}
+
+	if password != "" {
+		r.Password = password
+	}
+
+	r.UpdatedAt = time.Now()
+	if err := s.db.Save(&r).Error; err != nil {
+		return User{}, fmt.Errorf("failed to update user: %w", err)
+	}
+
+	return toUser(r), nil
 }
