@@ -11,6 +11,7 @@ import { AlarmsModule } from './pages/AlarmsModule'
 import { BootstrapModule } from './pages/BootstrapModule'
 import { BrokerHubModule } from './pages/BrokerHubModule'
 import { UsersModule } from './pages/UsersModule'
+import { WorkspacesModule } from './pages/WorkspacesModule'
 import { MessagesModule } from './pages/MessagesModule'
 import { RulesModule } from './pages/RulesModule'
 import { CrudModule } from './pages/CrudModule'
@@ -64,32 +65,7 @@ export const AppContent: React.FC = () => {
       {currentTab === 'brokerHub' && <BrokerHubModule />}
       {currentTab === 'users' && <UsersModule />}
 
-      {currentTab === 'workspaces' && (
-        <CrudModule
-          endpoint="/api/workspaces"
-          title="工作空间 (租户)"
-          columns={[
-            { key: 'name', label: '空间名称' },
-            { key: 'alias', label: '英文代号/别名' },
-            { key: 'id', label: '租户 ID' },
-            { key: 'description', label: '描述说明' },
-            {
-              key: 'status',
-              label: '状态',
-              render: (v) => (
-                <span className="inline-flex px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">
-                  {v}
-                </span>
-              ),
-            },
-          ]}
-          createFields={[
-            { name: 'name', label: '空间名称', placeholder: '例如：智慧工业园区 A 区' },
-            { name: 'alias', label: '英文别名/代号', placeholder: 'park-a' },
-            { name: 'description', label: '描述说明', placeholder: '租户业务描述...' },
-          ]}
-        />
-      )}
+      {currentTab === 'workspaces' && <WorkspacesModule />}
 
       {currentTab === 'groups' && (
         <CrudModule

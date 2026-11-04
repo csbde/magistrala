@@ -132,6 +132,26 @@ export const BootstrapModule: React.FC = () => {
         </div>
       </div>
 
+            {/* Industrial Batch Manufacturing Spec Banner */}
+      <div className="p-4 bg-gradient-to-r from-slate-900 to-indigo-950 rounded-xl text-white shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-1.5 text-xs text-blue-300 font-semibold bg-blue-500/20 px-2 py-0.5 rounded border border-blue-500/30">
+            <span>工业级大批量芯片烧录 · 零配置开箱 (Zero-Touch Provisioning)</span>
+          </div>
+          <div className="text-sm font-bold text-slate-100">
+            固件完全一致，出厂无需写死各自凭证
+          </div>
+          <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+            生产线上所有芯片烧录<strong>完全相同的固件镜像</strong>。设备首次上电联网时，自动读取芯片唯一硬件标识（如 MAC 地址或芯片 UID），通过 HTTP 请求 <code className="text-emerald-300 font-mono">GET /api/bootstrap/&lt;MAC&gt;</code> 动态获取专属通讯密钥与通道配置并持久化存入 Flash。
+          </p>
+        </div>
+        <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700 font-mono text-[11px] shrink-0 text-slate-300 space-y-1">
+          <div className="text-slate-400">设备开箱获取凭证接口:</div>
+          <div className="text-emerald-400">GET /api/bootstrap/&lt;MAC_OR_SN&gt;</div>
+          <div className="text-[10px] text-slate-400">支持预导入批次或首连自动注册</div>
+        </div>
+      </div>
+
       <Tabs
         items={[
           { id: 'profiles', label: '引导方案方案库 (Profiles)', icon: Settings2, badge: profiles.length },

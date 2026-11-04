@@ -106,6 +106,10 @@ func (s *Server) setupRoutes() {
 		// FluxMQ / MQTT Auth webhook endpoints (for external Broker authentication)
 		api.Post("/auth/mqtt", s.handleMQTTAuth)
 		api.Post("/auth/mqtt/acl", s.handleMQTTACL)
+
+		// Device Zero-Touch Bootstrap Endpoints (for factory batch-flashed chips)
+		api.Get("/bootstrap/{identifier}", s.handleDeviceBootstrap)
+		api.Post("/bootstrap", s.handleDeviceBootstrap)
 		api.Post("/hooks", s.handleFluxMQHooks)
 
 		// Auth & OIDC
@@ -126,6 +130,7 @@ func (s *Server) setupRoutes() {
 			auth.Get("/workspaces", s.handleListWorkspaces)
 			auth.Post("/workspaces", s.handleCreateWorkspace)
 			auth.Get("/workspaces/{id}", s.handleGetWorkspace)
+			auth.Put("/workspaces/{id}", s.handleUpdateWorkspace)
 			auth.Delete("/workspaces/{id}", s.handleDeleteWorkspace)
 
 			// Workspace-Scoped Resources (Enforced by Casbin Multi-Tenant)

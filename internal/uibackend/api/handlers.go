@@ -2045,3 +2045,160 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		"user":    updated,
 	})
 }
+
+func (s *Server) handleUpdateWorkspace(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ws, err := s.store.GetWorkspace(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+
+	var req store.Workspace
+	if !decodeBody(w, r, &req) {
+		return
+	}
+
+	if req.Name != "" {
+		ws.Name = req.Name
+	}
+	if req.Alias != "" {
+		ws.Alias = req.Alias
+	}
+	if req.Description != "" {
+		ws.Description = req.Description
+	}
+	if req.Status != "" {
+		ws.Status = req.Status
+	}
+	if req.Metadata != nil {
+		ws.Metadata = req.Metadata
+	}
+	if req.OwnerID != "" && req.OwnerID != ws.OwnerID {
+		ws.OwnerID = req.OwnerID
+		// Automatically grant new owner role:admin in Casbin
+		_, _ = s.casbin.AddRoleForUserInTenant("user:"+req.OwnerID, "role:admin", ws.ID)
+	}
+
+	saved := s.store.SaveWorkspace(ws)
+	s.journal(r, saved.ID, "workspace", "update", map[string]any{"name": saved.Name})
+	renderJSON(w, http.StatusOK, saved)
+}
+
+type deviceBootstrapRequest struct {
+	ExternalID string `json:"external_id"`
+	MAC        string `json:"mac"`
+}
+
+func (s *Server) handleDeviceBootstrap(w http.ResponseWriter, r *http.Request) {
+	identifier := chi.URLParam(r, "identifier")
+	if identifier == "" {
+		var req deviceBootstrapRequest
+		if decodeBody(w, r, &req) {
+			identifier = firstNonEmpty(req.ExternalID, req.MAC)
+		}
+	}
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		renderJSON(w, http.StatusBadRequest, map[string]any{"error": "missing device hardware identifier (MAC / Serial Number)"})
+		return
+	}
+
+	// 1. Search in pre-configured bootstrap configs
+	configs := s.store.ListBootstrapConfigs(store.QueryFilter{Limit: 500}).Items
+	var matchedConfig *store.BootstrapConfig
+	for _, c := range configs {
+		if strings.EqualFold(c.ExternalID, identifier) || strings.EqualFold(c.MACAddr, identifier) || c.ID == identifier {
+			matchedConfig = &c
+			break
+		}
+	}
+
+	var dev store.Device
+	var profile store.BootstrapProfile
+	var secret string
+
+	if matchedConfig != nil {
+		d, err := s.store.GetDevice(matchedConfig.DeviceID)
+		if err == nil {
+			dev = d
+			secret, _ = dev.Credentials["secret"].(string)
+		}
+		if matchedConfig.ProfileID != "" {
+			p, err := s.store.GetBootstrapProfile(matchedConfig.ProfileID)
+			if err == nil {
+				profile = p
+			}
+		}
+	}
+
+	// 2. If no pre-mapped config exists, auto-provision new device using default profile
+	if dev.ID == "" {
+		profiles := s.store.ListBootstrapProfiles(store.QueryFilter{Limit: 10}).Items
+		if len(profiles) > 0 {
+			profile = profiles[0]
+		}
+		wsID := profile.WorkspaceID
+		if wsID == "" {
+			wsList := s.store.ListWorkspaces(store.QueryFilter{Limit: 1}).Items
+			if len(wsList) > 0 {
+				wsID = wsList[0].ID
+			}
+		}
+
+		secret = fmt.Sprintf("sec-%s", store.GenID("token")[:12])
+		dev = s.store.SaveDevice(store.Device{
+			ID:          fmt.Sprintf("dev-%s", strings.ToLower(strings.ReplaceAll(identifier, ":", "-"))),
+			Name:        fmt.Sprintf("开箱自动注册设备 [%s]", identifier),
+			WorkspaceID: wsID,
+			Status:      "enabled",
+			Credentials: map[string]any{"secret": secret},
+			Metadata:    map[string]any{"auto_provisioned": true, "hardware_id": identifier},
+		})
+
+		// Auto-bind profile channels
+		for _, chID := range profile.Channels {
+			s.store.ConnectChannel(dev.ID, chID, wsID)
+		}
+
+		// Save config mapping
+		s.store.SaveBootstrapConfig(store.BootstrapConfig{
+			ID:          store.GenID("boot"),
+			ExternalID:  identifier,
+			DeviceID:    dev.ID,
+			WorkspaceID: wsID,
+			ProfileID:   profile.ID,
+			Channels:    profile.Channels,
+			Status:      "enabled",
+			Name:        fmt.Sprintf("开箱引导 · %s", dev.Name),
+			MACAddr:     identifier,
+		})
+	}
+
+	// 3. Render bootstrap configuration response to the device chip
+	brokerHost := "localhost"
+	renderJSON(w, http.StatusOK, map[string]any{
+		"status":    "bootstrapped",
+		"device_id": dev.ID,
+		"secret":    secret,
+		"channels":  profile.Channels,
+		"mqtt": map[string]any{
+			"host":     brokerHost,
+			"port":     1883,
+			"username": dev.ID,
+			"password": secret,
+			"topic":    fmt.Sprintf("channels/%s/messages", firstNonEmpty(profile.Channels...)),
+		},
+		"config_content": profile.Content,
+		"encrypted":      profile.Encrypted,
+	})
+}
+
+func firstNonEmpty(items ...string) string {
+	for _, it := range items {
+		if strings.TrimSpace(it) != "" {
+			return it
+		}
+	}
+	return ""
+}
