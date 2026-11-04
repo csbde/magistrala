@@ -1329,6 +1329,96 @@ func (s *DBStore) GetUserByEmail(email string) (User, bool) {
 	return toUser(r), true
 }
 
+func (s *DBStore) CreateUser(u User, password string) (User, error) {
+	email := strings.ToLower(strings.TrimSpace(u.Email))
+	if email == "" {
+		return User{}, fmt.Errorf("邮箱不能为空")
+	}
+	var existing userRow
+	if s.db.First(&existing, "email = ?", email).Error == nil {
+		return User{}, fmt.Errorf("邮箱 %s 已被注册", email)
+	}
+	if u.ID == "" {
+		u.ID = GenID("usr")
+	}
+	if u.Name == "" {
+		u.Name = strings.Split(email, "@")[0]
+	}
+	if u.Username == "" {
+		u.Username = strings.Split(email, "@")[0]
+	}
+	if u.Role == "" {
+		u.Role = "user"
+	}
+	if u.Status == "" {
+		u.Status = "enabled"
+	}
+
+	row := userRow{
+		ID:        u.ID,
+		Email:     email,
+		Name:      u.Name,
+		Username:  u.Username,
+		Role:      u.Role,
+		Status:    u.Status,
+		Profile:   JSONMap(u.Profile),
+		Password:  password,
+		Verified:  true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := s.db.Create(&row).Error; err != nil {
+		return User{}, fmt.Errorf("创建用户失败: %w", err)
+	}
+	return toUser(row), nil
+}
+
+func (s *DBStore) UpdateUser(id, name, email, password, role, status string) (User, error) {
+	var r userRow
+	if err := s.db.First(&r, "id = ?", id).Error; err != nil {
+		return User{}, fmt.Errorf("用户不存在: %w", err)
+	}
+
+	if email != "" && email != r.Email {
+		email = strings.ToLower(strings.TrimSpace(email))
+		var other userRow
+		if s.db.First(&other, "email = ? AND id != ?", email, id).Error == nil {
+			return User{}, fmt.Errorf("邮箱 %s 已被其他账号使用", email)
+		}
+		r.Email = email
+	}
+
+	if name != "" {
+		r.Name = strings.TrimSpace(name)
+	}
+	if password != "" {
+		r.Password = password
+	}
+	if role != "" {
+		r.Role = role
+	}
+	if status != "" {
+		r.Status = status
+	}
+
+	r.UpdatedAt = time.Now()
+	if err := s.db.Save(&r).Error; err != nil {
+		return User{}, fmt.Errorf("更新用户失败: %w", err)
+	}
+	return toUser(r), nil
+}
+
+func (s *DBStore) VerifyPassword(email, password string) (User, error) {
+	var r userRow
+	if err := s.db.First(&r, "email = ?", strings.ToLower(strings.TrimSpace(email))).Error; err != nil {
+		return User{}, fmt.Errorf("账号不存在")
+	}
+	if r.Password != "" && r.Password != password {
+		return User{}, fmt.Errorf("密码错误")
+	}
+	return toUser(r), nil
+}
+
 func (s *DBStore) SaveUser(u User) User {
 	if u.ID == "" {
 		u.ID = GenID("usr")
@@ -1340,11 +1430,12 @@ func (s *DBStore) SaveUser(u User) User {
 	var existing userRow
 	if s.db.First(&existing, "id = ?", u.ID).Error == nil {
 		row.CreatedAt = existing.CreatedAt
-	} else if match, ok := s.GetUserByEmail(u.Email); ok {
-		u.ID = match.ID
-		row.ID = match.ID
-		row.CreatedAt = match.CreatedAt
-		// row.PasswordHash = existing.PasswordHash
+		row.Password = existing.Password
+	} else if s.db.First(&existing, "email = ?", u.Email).Error == nil {
+		u.ID = existing.ID
+		row.ID = existing.ID
+		row.CreatedAt = existing.CreatedAt
+		row.Password = existing.Password
 	} else {
 		row.CreatedAt = time.Now()
 	}

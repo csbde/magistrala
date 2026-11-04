@@ -410,6 +410,9 @@ type Storage interface {
 	ListUsers(q QueryFilter) Page[User]
 	GetUser(id string) (User, error)
 	GetUserByEmail(email string) (User, bool)
+	CreateUser(u User, password string) (User, error)
+	UpdateUser(id, name, email, password, role, status string) (User, error)
+	VerifyPassword(email, password string) (User, error)
 	SaveUser(u User) User
 	UpdateProfile(id, name, email, password string) (User, error)
 	DeleteUser(id string)

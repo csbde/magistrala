@@ -132,6 +132,9 @@ func (s *Server) setupRoutes() {
 			auth.Get("/workspaces/{id}", s.handleGetWorkspace)
 			auth.Put("/workspaces/{id}", s.handleUpdateWorkspace)
 			auth.Delete("/workspaces/{id}", s.handleDeleteWorkspace)
+			auth.Get("/workspaces/{id}/members", s.handleListWorkspaceMembers)
+			auth.Post("/workspaces/{id}/members", s.handleBindWorkspaceMember)
+			auth.Delete("/workspaces/{id}/members/{userId}", s.handleUnbindWorkspaceMember)
 
 			// Workspace-Scoped Resources (Enforced by Casbin Multi-Tenant)
 			auth.Group(func(scoped chi.Router) {
@@ -246,6 +249,9 @@ func (s *Server) setupRoutes() {
 
 				// Users & Roles in Workspace
 				scoped.Get("/users", s.handleListUsers)
+				scoped.Post("/users", s.handleCreateUser)
+				scoped.Put("/users/{id}", s.handleUpdateUser)
+				scoped.Delete("/users/{id}", s.handleDeleteUser)
 				scoped.Get("/roles", s.handleListRoles)
 				scoped.Post("/roles/assign", s.handleAssignRole)
 				scoped.Post("/roles/revoke", s.handleRevokeRole)

@@ -6,6 +6,7 @@ package casbin
 import (
 	_ "embed"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/casbin/casbin/v2"
@@ -51,35 +52,65 @@ func (m *Manager) initDefaultPolicies() error {
 	// Admin has full access to resources under the workspace
 	policies := [][]string{
 		{"role:admin", "*", "/api/workspaces/*", ".*"},
+		{"role:admin", "*", "/api/workspaces", ".*"},
 		{"role:admin", "*", "/api/devices/*", ".*"},
+		{"role:admin", "*", "/api/devices", ".*"},
 		{"role:admin", "*", "/api/channels/*", ".*"},
+		{"role:admin", "*", "/api/channels", ".*"},
 		{"role:admin", "*", "/api/groups/*", ".*"},
+		{"role:admin", "*", "/api/groups", ".*"},
 		{"role:admin", "*", "/api/rules/*", ".*"},
+		{"role:admin", "*", "/api/rules", ".*"},
 		{"role:admin", "*", "/api/alarms/*", ".*"},
+		{"role:admin", "*", "/api/alarms", ".*"},
 		{"role:admin", "*", "/api/reports/*", ".*"},
+		{"role:admin", "*", "/api/reports", ".*"},
 		{"role:admin", "*", "/api/bootstraps/*", ".*"},
+		{"role:admin", "*", "/api/bootstraps", ".*"},
 		{"role:admin", "*", "/api/users/*", ".*"},
+		{"role:admin", "*", "/api/users", ".*"},
 		{"role:admin", "*", "/api/roles/*", ".*"},
+		{"role:admin", "*", "/api/roles", ".*"},
 
 		// Editor can read and modify entities, but cannot delete or manage roles
 		{"role:editor", "*", "/api/devices/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/devices", "GET|POST|PUT|PATCH"},
 		{"role:editor", "*", "/api/channels/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/channels", "GET|POST|PUT|PATCH"},
 		{"role:editor", "*", "/api/groups/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/groups", "GET|POST|PUT|PATCH"},
 		{"role:editor", "*", "/api/rules/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/rules", "GET|POST|PUT|PATCH"},
 		{"role:editor", "*", "/api/alarms/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/alarms", "GET|POST|PUT|PATCH"},
 		{"role:editor", "*", "/api/reports/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/reports", "GET|POST|PUT|PATCH"},
 		{"role:editor", "*", "/api/bootstraps/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/bootstraps", "GET|POST|PUT|PATCH"},
 		{"role:editor", "*", "/api/workspaces/*", "GET"},
+		{"role:editor", "*", "/api/workspaces", "GET"},
+		{"role:editor", "*", "/api/users/*", "GET"},
+		{"role:editor", "*", "/api/users", "GET"},
 
 		// Viewer can only read
 		{"role:viewer", "*", "/api/devices/*", "GET"},
+		{"role:viewer", "*", "/api/devices", "GET"},
 		{"role:viewer", "*", "/api/channels/*", "GET"},
+		{"role:viewer", "*", "/api/channels", "GET"},
 		{"role:viewer", "*", "/api/groups/*", "GET"},
+		{"role:viewer", "*", "/api/groups", "GET"},
 		{"role:viewer", "*", "/api/rules/*", "GET"},
+		{"role:viewer", "*", "/api/rules", "GET"},
 		{"role:viewer", "*", "/api/alarms/*", "GET"},
+		{"role:viewer", "*", "/api/alarms", "GET"},
 		{"role:viewer", "*", "/api/reports/*", "GET"},
+		{"role:viewer", "*", "/api/reports", "GET"},
 		{"role:viewer", "*", "/api/bootstraps/*", "GET"},
+		{"role:viewer", "*", "/api/bootstraps", "GET"},
 		{"role:viewer", "*", "/api/workspaces/*", "GET"},
+		{"role:viewer", "*", "/api/workspaces", "GET"},
+		{"role:viewer", "*", "/api/users/*", "GET"},
+		{"role:viewer", "*", "/api/users", "GET"},
 	}
 
 	for _, p := range policies {
@@ -157,4 +188,39 @@ func (m *Manager) GetPoliciesForTenant(dom string) [][]string {
 	defer m.mu.RUnlock()
 	policies, _ := m.enforcer.GetFilteredPolicy(1, dom)
 	return policies
+}
+
+// RemoveAllRolesForUserInTenant removes all role assignments for a user in a tenant
+func (m *Manager) RemoveAllRolesForUserInTenant(user, dom string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	roles := m.enforcer.GetRolesForUserInDomain(user, dom)
+	for _, r := range roles {
+		_, _ = m.enforcer.RemoveGroupingPolicy(user, r, dom)
+	}
+	return nil
+}
+
+// RemoveUser removes all grouping policies for a user across all tenants
+func (m *Manager) RemoveUser(user string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, err := m.enforcer.RemoveFilteredGroupingPolicy(0, user)
+	return err
+}
+
+// GetTenantMembers returns a map of userID -> []roles in the given tenant/domain
+func (m *Manager) GetTenantMembers(dom string) map[string][]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	rules, _ := m.enforcer.GetFilteredGroupingPolicy(2, dom)
+	result := make(map[string][]string)
+	for _, r := range rules {
+		if len(r) >= 3 {
+			userID := strings.TrimPrefix(r[0], "user:")
+			role := r[1]
+			result[userID] = append(result[userID], role)
+		}
+	}
+	return result
 }

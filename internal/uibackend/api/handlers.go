@@ -154,11 +154,17 @@ func (s *Server) handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, ok := s.store.GetUserByEmail(email)
-	if !ok {
-		// Bootstrap the first administrator automatically.
-		user = s.store.SaveUser(store.User{
-			ID:       store.GenID("usr"),
+	user, err := s.store.VerifyPassword(email, req.Password)
+	if err != nil {
+		// Only auto-bootstrap the very first administrator when the
+		// system does not contain ANY users yet. Once users exist,
+		// an unknown email/password must never silently create a new
+		// account (this was the cause of duplicate phantom users).
+		if s.store.ListUsers(store.QueryFilter{Limit: 1}).Total > 0 {
+			http.Error(w, `{"error":"账号或密码错误"}`, http.StatusUnauthorized)
+			return
+		}
+		user, err = s.store.CreateUser(store.User{
 			Email:    email,
 			Name:     email,
 			Username: strings.Split(email, "@")[0],
@@ -166,10 +172,14 @@ func (s *Server) handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
 			Status:   "enabled",
 			Profile:  map[string]any{},
 			Verified: true,
-		})
+		}, req.Password)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
 	}
 	if user.Status == "disabled" {
-		http.Error(w, `{"error":"account disabled"}`, http.StatusForbidden)
+		http.Error(w, `{"error":"账号已被禁用，请联系租户管理员"}`, http.StatusForbidden)
 		return
 	}
 
@@ -424,6 +434,9 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	created := s.store.SaveWorkspace(ws)
 	// Creator always becomes admin of the new tenant (strict isolation).
 	_, _ = s.casbin.AddRoleForUserInTenant("user:"+claims.UserID, "role:admin", created.ID)
+	if ws.OwnerID != "" && ws.OwnerID != claims.UserID {
+		_, _ = s.casbin.AddRoleForUserInTenant("user:"+ws.OwnerID, "role:admin", created.ID)
+	}
 	s.journal(r, created.ID, "workspace", "create", map[string]any{"name": created.Name})
 	renderJSON(w, http.StatusCreated, created)
 }
@@ -1544,6 +1557,103 @@ func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request) 
 // Users & Roles (Casbin Multi-Tenant access management)
 // ---------------------------------------------------------------------------
 
+func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	wsID := ctxWorkspace(r)
+	var body struct {
+		Name          string `json:"name"`
+		Email         string `json:"email"`
+		Password      string `json:"password"`
+		Role          string `json:"role"`
+		WorkspaceRole string `json:"workspace_role"`
+	}
+	if !decodeBody(w, r, &body) || strings.TrimSpace(body.Email) == "" {
+		badRequest(w, "邮箱不能为空")
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		name = strings.Split(email, "@")[0]
+	}
+	role := body.Role
+	if role == "" {
+		role = "user"
+	}
+
+	created, err := s.store.CreateUser(store.User{
+		Email:    email,
+		Name:     name,
+		Username: strings.Split(email, "@")[0],
+		Role:     role,
+		Status:   "enabled",
+	}, body.Password)
+	if err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+
+	assignedRole := body.WorkspaceRole
+	if assignedRole == "" {
+		assignedRole = "role:viewer"
+	}
+	if wsID != "" {
+		_, _ = s.casbin.AddRoleForUserInTenant("user:"+created.ID, assignedRole, wsID)
+	}
+
+	s.journal(r, created.ID, "user", "create", map[string]any{
+		"email":          created.Email,
+		"workspace_id":   wsID,
+		"workspace_role": assignedRole,
+	})
+	renderJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	wsID := ctxWorkspace(r)
+
+	var body struct {
+		Name          string `json:"name"`
+		Email         string `json:"email"`
+		Password      string `json:"password,omitempty"`
+		Role          string `json:"role,omitempty"`
+		Status        string `json:"status,omitempty"`
+		WorkspaceRole string `json:"workspace_role,omitempty"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+
+	updated, err := s.store.UpdateUser(id, body.Name, body.Email, body.Password, body.Role, body.Status)
+	if err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+
+	if body.WorkspaceRole != "" && wsID != "" {
+		_ = s.casbin.RemoveAllRolesForUserInTenant("user:"+id, wsID)
+		_, _ = s.casbin.AddRoleForUserInTenant("user:"+id, body.WorkspaceRole, wsID)
+	}
+
+	s.journal(r, updated.ID, "user", "update", map[string]any{"email": updated.Email})
+	renderJSON(w, http.StatusOK, updated)
+}
+
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	claims := ctxUser(r)
+	if claims != nil && claims.UserID == id {
+		badRequest(w, "不能删除当前登录账号")
+		return
+	}
+
+	s.store.DeleteUser(id)
+	_ = s.casbin.RemoveUser("user:" + id)
+	s.journal(r, id, "user", "delete", nil)
+	renderJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	wsID := ctxWorkspace(r)
 	page := s.store.ListUsers(parseFilter(r, wsID))
@@ -2044,6 +2154,118 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		"message": "个人资料更新成功",
 		"user":    updated,
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Workspace Members (Tenants <-> Users Binding)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleListWorkspaceMembers(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ws, err := s.store.GetWorkspace(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+
+	memberRoles := s.casbin.GetTenantMembers(id)
+	if ws.OwnerID != "" {
+		if _, ok := memberRoles[ws.OwnerID]; !ok {
+			memberRoles[ws.OwnerID] = []string{"role:admin"}
+			_, _ = s.casbin.AddRoleForUserInTenant("user:"+ws.OwnerID, "role:admin", id)
+		}
+	}
+
+	type MemberItem struct {
+		store.User
+		Roles   []string `json:"workspace_roles"`
+		IsOwner bool     `json:"is_owner"`
+	}
+
+	items := make([]MemberItem, 0, len(memberRoles))
+	for uid, roles := range memberRoles {
+		u, err := s.store.GetUser(uid)
+		if err != nil {
+			u = store.User{ID: uid, Email: uid, Name: uid, Status: "enabled"}
+		}
+		items = append(items, MemberItem{
+			User:    u,
+			Roles:   roles,
+			IsOwner: uid == ws.OwnerID,
+		})
+	}
+
+	renderJSON(w, http.StatusOK, map[string]any{
+		"workspace_id": id,
+		"workspace":    ws,
+		"items":        items,
+		"total":        len(items),
+	})
+}
+
+func (s *Server) handleBindWorkspaceMember(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ws, err := s.store.GetWorkspace(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+
+	var body struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}
+	if !decodeBody(w, r, &body) || body.UserID == "" || body.Role == "" {
+		badRequest(w, "user_id and role are required")
+		return
+	}
+
+	if _, err := s.store.GetUser(body.UserID); err != nil {
+		notFound(w, fmt.Errorf("用户不存在"))
+		return
+	}
+
+	_ = s.casbin.RemoveAllRolesForUserInTenant("user:"+body.UserID, id)
+	_, err = s.casbin.AddRoleForUserInTenant("user:"+body.UserID, body.Role, id)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+
+	s.journal(r, body.UserID, "workspace", "bind_member", map[string]any{
+		"workspace_id":   id,
+		"workspace_name": ws.Name,
+		"role":           body.Role,
+	})
+
+	renderJSON(w, http.StatusOK, map[string]string{
+		"status":  "bound",
+		"user_id": body.UserID,
+		"role":    body.Role,
+	})
+}
+
+func (s *Server) handleUnbindWorkspaceMember(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	userId := chi.URLParam(r, "userId")
+
+	ws, err := s.store.GetWorkspace(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+
+	if ws.OwnerID != "" && ws.OwnerID == userId {
+		http.Error(w, `{"error":"无法移出租户所有者/管理员"}`, http.StatusBadRequest)
+		return
+	}
+
+	_ = s.casbin.RemoveAllRolesForUserInTenant("user:"+userId, id)
+	s.journal(r, userId, "workspace", "unbind_member", map[string]any{
+		"workspace_id": id,
+	})
+
+	renderJSON(w, http.StatusOK, map[string]string{"status": "unbound"})
 }
 
 func (s *Server) handleUpdateWorkspace(w http.ResponseWriter, r *http.Request) {
