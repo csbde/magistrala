@@ -429,6 +429,7 @@ type Storage interface {
 	// Messages & Telemetry
 	SaveMessage(m MessageRecord) MessageRecord
 	ListMessages(channelID string, limit int) []MessageRecord
+	ListDeviceMessages(deviceID string, limit int) []MessageRecord
 
 	// Journals
 	AddJournal(j Journal) Journal

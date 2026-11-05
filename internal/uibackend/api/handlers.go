@@ -723,24 +723,81 @@ func (s *Server) handleCreateGateway(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListGatewayDevices(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	renderJSON(w, http.StatusOK, s.store.ListGatewayDevices(id))
+	declared := s.store.ListGatewayDevices(id)
+
+	type GatewayChildInfo struct {
+		store.Device
+		LivenessStatus string     `json:"liveness_status"` // healthy | silent
+		LastSeenAt     *time.Time `json:"last_seen_at,omitempty"`
+		MessageCount   int        `json:"message_count"`
+	}
+
+	res := make([]GatewayChildInfo, 0, len(declared))
+	for _, dev := range declared {
+		msgs := s.store.ListDeviceMessages(dev.ID, 1)
+		liveness := "silent"
+		var lastSeen *time.Time
+		count := len(msgs)
+		if count > 0 {
+			lastSeen = &msgs[0].CreatedAt
+			if time.Since(msgs[0].CreatedAt) < 24*time.Hour {
+				liveness = "healthy"
+			}
+		}
+
+		res = append(res, GatewayChildInfo{
+			Device:         dev,
+			LivenessStatus: liveness,
+			LastSeenAt:     lastSeen,
+			MessageCount:   count,
+		})
+	}
+
+	renderJSON(w, http.StatusOK, map[string]any{
+		"gateway_id": id,
+		"items":      res,
+		"total":      len(res),
+	})
 }
 
 func (s *Server) handleBindGatewayDevice(w http.ResponseWriter, r *http.Request) {
 	gwID := chi.URLParam(r, "id")
 	var body struct {
-		DeviceID string `json:"device_id"`
+		DeviceID  string   `json:"device_id"`
+		DeviceIDs []string `json:"device_ids"`
 	}
-	if !decodeBody(w, r, &body) || body.DeviceID == "" {
-		badRequest(w, "device_id is required")
+	if !decodeBody(w, r, &body) {
 		return
 	}
-	if err := s.store.BindGatewayDevice(gwID, body.DeviceID); err != nil {
-		badRequest(w, err.Error())
+	var ids []string
+	if body.DeviceID != "" {
+		ids = append(ids, body.DeviceID)
+	}
+	if len(body.DeviceIDs) > 0 {
+		ids = append(ids, body.DeviceIDs...)
+	}
+	if len(ids) == 0 {
+		badRequest(w, "device_id or device_ids is required")
 		return
 	}
-	s.journal(r, gwID, "gateway", "bind_device", map[string]any{"device_id": body.DeviceID})
-	renderJSON(w, http.StatusOK, map[string]string{"status": "bound"})
+
+	boundCount := 0
+	var firstErr string
+	for _, did := range ids {
+		if err := s.store.BindGatewayDevice(gwID, did); err != nil {
+			if firstErr == "" {
+				firstErr = err.Error()
+			}
+		} else {
+			boundCount++
+		}
+	}
+	if boundCount == 0 && firstErr != "" {
+		badRequest(w, firstErr)
+		return
+	}
+	s.journal(r, gwID, "gateway", "bind_devices", map[string]any{"count": boundCount, "ids": ids})
+	renderJSON(w, http.StatusOK, map[string]any{"status": "bound", "count": boundCount})
 }
 
 func (s *Server) handleUnbindGatewayDevice(w http.ResponseWriter, r *http.Request) {

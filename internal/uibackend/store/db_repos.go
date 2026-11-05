@@ -252,11 +252,20 @@ func (s *DBStore) BindGatewayDevice(gatewayID, deviceID string) error {
 		return err
 	}
 	if !gw.IsGateway {
-		return errors.New("target device is not a gateway")
+		return errors.New("目标设备未开启网关模式 (target device is not a gateway)")
 	}
 	if deviceID == gatewayID {
-		return errors.New("gateway cannot be its own sub-device")
+		return errors.New("网关不能挂载自身为子设备")
 	}
+
+	var child deviceRow
+	if err := s.db.First(&child, "id = ?", deviceID).Error; err != nil {
+		return errors.New("指定子设备不存在")
+	}
+	if child.IsGateway {
+		return errors.New("网关不能作为另一个网关的子设备，网关不可链式嵌套 (gateways do not chain)")
+	}
+
 	return s.db.Model(&deviceRow{}).Where("id = ?", deviceID).
 		Updates(map[string]any{"parent_id": gatewayID, "updated_at": time.Now()}).Error
 }
@@ -381,6 +390,24 @@ func (s *DBStore) ListChannelDevices(channelID string) []Device {
 	items := make([]Device, len(rows))
 	for i, r := range rows {
 		items[i] = toDevice(r)
+	}
+	return items
+}
+
+func (s *DBStore) ListDeviceMessages(deviceID string, limit int) []MessageRecord {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows []messageRow
+	s.db.Where("publisher = ? OR subtopic LIKE ?", deviceID, "%"+deviceID+"%").
+		Order("created_at desc").Limit(limit).Find(&rows)
+	items := make([]MessageRecord, len(rows))
+	for i, r := range rows {
+		items[i] = MessageRecord{
+			ID: r.ID, ChannelID: r.ChannelID, Subtopic: r.Subtopic, Publisher: r.Publisher,
+			Protocol: r.Protocol, Payload: r.Payload, Name: r.Name, Value: r.Value,
+			Unit: r.Unit, Time: r.Time, CreatedAt: r.CreatedAt,
+		}
 	}
 	return items
 }
