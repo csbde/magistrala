@@ -12,6 +12,7 @@ import {
   BellRing,
   Database,
   Settings2,
+  Sliders,
   Users,
   Key,
   Server,
@@ -102,11 +103,12 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
       ],
     },
     {
-      title: '权限与接入',
+      title: '权限与设置',
       items: [
         { id: 'users', label: t.users, icon: Users },
         { id: 'pats', label: t.pats, icon: Key },
         { id: 'brokerHub', label: t.brokerHub, icon: Radio },
+        { id: 'settings', label: '系统与登录配置', icon: Sliders },
       ],
     },
   ]

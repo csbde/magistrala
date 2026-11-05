@@ -426,4 +426,9 @@ type Storage interface {
 	// Support
 	CreateSupportTicket(t SupportTicket) SupportTicket
 	ListSupportTickets(userID string) []SupportTicket
+
+	// System Settings
+	GetSetting(key, defaultVal string) string
+	SetSetting(key, val string) error
+	GetAllSettings() map[string]string
 }

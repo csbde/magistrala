@@ -1,3 +1,4 @@
+import { SettingsModule } from './pages/SettingsModule'
 import React, { useState, useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from './store/authStore'
@@ -64,6 +65,7 @@ export const AppContent: React.FC = () => {
       {currentTab === 'bootstraps' && <BootstrapModule />}
       {currentTab === 'brokerHub' && <BrokerHubModule />}
       {currentTab === 'users' && <UsersModule />}
+      {currentTab === 'settings' && <SettingsModule />}
 
       {currentTab === 'workspaces' && <WorkspacesModule />}
 

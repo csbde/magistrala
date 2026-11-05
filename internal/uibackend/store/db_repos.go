@@ -1580,3 +1580,34 @@ func (s *DBStore) UpdateProfile(id, name, email, password string) (User, error) 
 
 	return toUser(r), nil
 }
+
+// ---------------------------------------------------------------------------
+// System Settings
+// ---------------------------------------------------------------------------
+
+func (s *DBStore) GetSetting(key, defaultVal string) string {
+	var r systemSettingRow
+	if err := s.db.First(&r, "key = ?", key).Error; err != nil {
+		return defaultVal
+	}
+	return r.Value
+}
+
+func (s *DBStore) SetSetting(key, val string) error {
+	r := systemSettingRow{
+		Key:       key,
+		Value:     val,
+		UpdatedAt: time.Now(),
+	}
+	return s.db.Save(&r).Error
+}
+
+func (s *DBStore) GetAllSettings() map[string]string {
+	var rows []systemSettingRow
+	s.db.Find(&rows)
+	res := make(map[string]string, len(rows))
+	for _, r := range rows {
+		res[r.Key] = r.Value
+	}
+	return res
+}

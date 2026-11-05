@@ -292,18 +292,73 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOIDCInfo(w http.ResponseWriter, r *http.Request) {
-	if s.oidcSvc == nil {
-		renderJSON(w, http.StatusOK, map[string]any{"enabled": false})
+	btnName := s.store.GetSetting("oidc_provider_name", "")
+	if btnName == "" {
+		if s.oidcSvc != nil {
+			btnName = s.oidcSvc.Config().ProviderName
+		}
+		if btnName == "" {
+			btnName = "SSO 单点登录"
+		}
+	}
+
+	enabledStr := s.store.GetSetting("oidc_enabled", "")
+	enabled := true
+	if enabledStr == "false" {
+		enabled = false
+	} else if enabledStr == "" && s.oidcSvc == nil {
+		enabled = false
+	}
+
+	issuerURL := s.store.GetSetting("oidc_issuer_url", "")
+	clientID := s.store.GetSetting("oidc_client_id", "")
+	if s.oidcSvc != nil {
+		cfg := s.oidcSvc.Config()
+		if issuerURL == "" {
+			issuerURL = cfg.IssuerURL
+		}
+		if clientID == "" {
+			clientID = cfg.ClientID
+		}
+	}
+
+	renderJSON(w, http.StatusOK, map[string]any{
+		"enabled":       enabled,
+		"provider_name": btnName,
+		"issuer_url":    issuerURL,
+		"client_id":     clientID,
+	})
+}
+
+func (s *Server) handleGetSystemSettings(w http.ResponseWriter, r *http.Request) {
+	settings := s.store.GetAllSettings()
+	if _, ok := settings["oidc_provider_name"]; !ok {
+		if s.oidcSvc != nil && s.oidcSvc.Config().ProviderName != "" {
+			settings["oidc_provider_name"] = s.oidcSvc.Config().ProviderName
+		} else {
+			settings["oidc_provider_name"] = "SSO 单点登录"
+		}
+	}
+	if _, ok := settings["oidc_enabled"]; !ok {
+		if s.oidcSvc != nil {
+			settings["oidc_enabled"] = "true"
+		} else {
+			settings["oidc_enabled"] = "false"
+		}
+	}
+	renderJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request) {
+	var body map[string]string
+	if !decodeBody(w, r, &body) {
 		return
 	}
-	cfg := s.oidcSvc.Config()
-	renderJSON(w, http.StatusOK, map[string]any{
-		"enabled":       true,
-		"provider_name": cfg.ProviderName,
-		"issuer_url":    cfg.IssuerURL,
-		"client_id":     cfg.ClientID,
-		"scopes":        cfg.Scopes,
-	})
+	for k, v := range body {
+		_ = s.store.SetSetting(k, v)
+	}
+	s.journal(r, "system", "settings", "update", map[string]any{"updated_keys": len(body)})
+	renderJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
 func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {

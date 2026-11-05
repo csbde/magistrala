@@ -126,6 +126,10 @@ func (s *Server) setupRoutes() {
 			auth.Put("/auth/profile", s.handleUpdateProfile)
 			auth.Post("/auth/switch-workspace", s.handleSwitchWorkspace)
 
+			// System Settings
+			auth.Get("/system/settings", s.handleGetSystemSettings)
+			auth.Put("/system/settings", s.handleUpdateSystemSettings)
+
 			// Workspaces (Tenants)
 			auth.Get("/workspaces", s.handleListWorkspaces)
 			auth.Post("/workspaces", s.handleCreateWorkspace)

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { fetchApi } from '../lib/api'
 import { dict } from '../lib/i18n'
@@ -12,6 +12,14 @@ export const Login: React.FC = () => {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [oidcInfo, setOidcInfo] = useState<{ enabled?: boolean; provider_name?: string } | null>(null)
+
+  useEffect(() => {
+    fetch('/api/auth/oidc/info')
+      .then((res) => res.json())
+      .then((data) => setOidcInfo(data))
+      .catch(() => {})
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -110,27 +118,29 @@ export const Login: React.FC = () => {
             </div>
           </form>
 
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-700" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="bg-slate-800 px-2 text-slate-400">或者使用单点登录</span>
-              </div>
-            </div>
-
+          {oidcInfo?.enabled !== false && (
             <div className="mt-6">
-              <button
-                type="button"
-                onClick={handleOIDC}
-                className="flex w-full justify-center items-center gap-2 rounded-lg bg-slate-700 hover:bg-slate-600 px-3 py-2.5 text-sm font-medium text-white shadow-sm border border-slate-600 transition"
-              >
-                <KeyRound className="w-4 h-4 text-emerald-400" />
-                <span>{t.ssoLogin}</span>
-              </button>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-700" />
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="bg-slate-800 px-2 text-slate-400">或者使用单点登录</span>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <button
+                  type="button"
+                  onClick={handleOIDC}
+                  className="flex w-full justify-center items-center gap-2 rounded-lg bg-slate-700 hover:bg-slate-600 px-3 py-2.5 text-sm font-medium text-white shadow-sm border border-slate-600 transition"
+                >
+                  <KeyRound className="w-4 h-4 text-emerald-400" />
+                  <span>{oidcInfo?.provider_name || t.ssoLogin}</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

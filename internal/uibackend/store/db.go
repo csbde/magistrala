@@ -325,6 +325,14 @@ type patRow struct {
 
 func (patRow) TableName() string { return "mg_pats" }
 
+type systemSettingRow struct {
+	Key       string    `gorm:"primaryKey;size:128"`
+	Value     string    `gorm:"type:text"`
+	UpdatedAt time.Time
+}
+
+func (systemSettingRow) TableName() string { return "mg_system_settings" }
+
 type supportTicketRow struct {
 	ID        string     `gorm:"primaryKey;size:64"`
 	UserID    string     `gorm:"index;size:64"`
@@ -379,7 +387,7 @@ func newStore(db *gorm.DB) (*DBStore, error) {
 		&bootstrapProfileRow{}, &bootstrapConfigRow{},
 		&deviceTypeRow{}, &deviceTypeVersionRow{}, &reportRow{}, &dashboardRow{},
 		&customNodeRow{}, &messageRow{}, &journalRow{}, &invitationRow{},
-		&patRow{}, &supportTicketRow{},
+		&patRow{}, &supportTicketRow{}, &systemSettingRow{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to run AutoMigrate: %w", err)
 	}
