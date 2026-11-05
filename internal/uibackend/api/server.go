@@ -158,6 +158,7 @@ func (s *Server) setupRoutes() {
 				// Devices
 				scoped.Get("/devices", s.handleListDevices)
 				scoped.Post("/devices", s.handleCreateDevice)
+				scoped.Post("/devices/bulk", s.handleBulkCreateDevices)
 				scoped.Get("/devices/{id}", s.handleGetDevice)
 				scoped.Put("/devices/{id}", s.handleUpdateDevice)
 				scoped.Delete("/devices/{id}", s.handleDeleteDevice)
@@ -176,6 +177,7 @@ func (s *Server) setupRoutes() {
 				// Channels
 				scoped.Get("/channels", s.handleListChannels)
 				scoped.Post("/channels", s.handleCreateChannel)
+				scoped.Post("/channels/bulk", s.handleBulkCreateChannels)
 				scoped.Get("/channels/{id}", s.handleGetChannel)
 				scoped.Put("/channels/{id}", s.handleUpdateChannel)
 				scoped.Delete("/channels/{id}", s.handleDeleteChannel)

@@ -548,6 +548,47 @@ func (s *Server) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
 	renderJSON(w, http.StatusCreated, created)
 }
 
+func (s *Server) handleBulkCreateDevices(w http.ResponseWriter, r *http.Request) {
+	wsID := ctxWorkspace(r)
+	var req struct {
+		Devices []store.Device `json:"devices"`
+	}
+	if !decodeBody(w, r, &req) || len(req.Devices) == 0 {
+		badRequest(w, "devices array is required")
+		return
+	}
+
+	createdList := make([]store.Device, 0, len(req.Devices))
+	for _, d := range req.Devices {
+		if strings.TrimSpace(d.Name) == "" {
+			continue
+		}
+		d.WorkspaceID = wsID
+		if d.ID == "" {
+			d.ID = store.GenID("dev")
+		}
+		if d.Status == "" {
+			d.Status = "enabled"
+		}
+		if d.Credentials == nil {
+			d.Credentials = map[string]any{"secret": store.GenID("sec")}
+		} else if _, ok := d.Credentials["secret"]; !ok {
+			d.Credentials["secret"] = store.GenID("sec")
+		}
+		if d.Metadata == nil {
+			d.Metadata = map[string]any{}
+		}
+		created := s.store.SaveDevice(d)
+		createdList = append(createdList, created)
+	}
+
+	s.journal(r, "devices", "bulk_create", "device", map[string]any{"count": len(createdList)})
+	renderJSON(w, http.StatusCreated, map[string]any{
+		"created_count": len(createdList),
+		"items":         createdList,
+	})
+}
+
 func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	dev, err := s.store.GetDevice(id)
@@ -741,6 +782,42 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 	created := s.store.SaveChannel(c)
 	s.journal(r, created.ID, "channel", "create", map[string]any{"name": created.Name})
 	renderJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleBulkCreateChannels(w http.ResponseWriter, r *http.Request) {
+	wsID := ctxWorkspace(r)
+	var req struct {
+		Channels []store.Channel `json:"channels"`
+	}
+	if !decodeBody(w, r, &req) || len(req.Channels) == 0 {
+		badRequest(w, "channels array is required")
+		return
+	}
+
+	createdList := make([]store.Channel, 0, len(req.Channels))
+	for _, ch := range req.Channels {
+		if strings.TrimSpace(ch.Name) == "" {
+			continue
+		}
+		ch.WorkspaceID = wsID
+		if ch.ID == "" {
+			ch.ID = store.GenID("ch")
+		}
+		if ch.Status == "" {
+			ch.Status = "enabled"
+		}
+		if ch.Metadata == nil {
+			ch.Metadata = map[string]any{}
+		}
+		created := s.store.SaveChannel(ch)
+		createdList = append(createdList, created)
+	}
+
+	s.journal(r, "channels", "bulk_create", "channel", map[string]any{"count": len(createdList)})
+	renderJSON(w, http.StatusCreated, map[string]any{
+		"created_count": len(createdList),
+		"items":         createdList,
+	})
 }
 
 func (s *Server) handleGetChannel(w http.ResponseWriter, r *http.Request) {

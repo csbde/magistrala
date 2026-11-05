@@ -28,6 +28,7 @@ import {
   Activity,
   Settings,
   Search,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { useToast } from '../components/ui/Toast'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -42,6 +43,8 @@ export const ChannelsModule: React.FC = () => {
 
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [csvContent, setCsvContent] = useState('')
   const [detailChannel, setDetailChannel] = useState<Channel | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>('general')
   const [connectOpen, setConnectOpen] = useState(false)
@@ -74,7 +77,22 @@ export const ChannelsModule: React.FC = () => {
     enabled: !!detailChannel?.id,
   })
 
-  const create = useMutation({
+  const bulkCreate = useMutation({
+    mutationFn: (channels: any[]) =>
+      fetchApi('/api/channels/bulk', {
+        method: 'POST',
+        body: JSON.stringify({ channels }),
+      }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: wsKey })
+      setBulkOpen(false)
+      setCsvContent('')
+      success(`成功批量创建 ${res.created_count || 0} 个通信通道`)
+    },
+    onError: (e: any) => toastError(e.message || '批量创建失败'),
+  })
+
+    const create = useMutation({
     mutationFn: (payload: any) => fetchApi<Channel>('/api/channels', { method: 'POST', body: JSON.stringify(payload) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: wsKey })
@@ -137,6 +155,46 @@ export const ChannelsModule: React.FC = () => {
     { id: 'simulator', label: '消息测试台 (Simulator)', icon: Activity },
   ]
 
+  const handleImportChannelsCSV = () => {
+    if (!csvContent.trim()) {
+      toastError('请输入或粘贴 CSV 内容')
+      return
+    }
+    const lines = csvContent.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (lines.length < 2) {
+      toastError('CSV 数据至少需要包含标题行与 1 行通道数据')
+      return
+    }
+    const headers = lines[0].split(',').map((h) => h.trim().replace(/^["']|["']$/g, '').toLowerCase())
+    const nameIdx = headers.indexOf('name')
+    if (nameIdx === -1) {
+      toastError('CSV 必须包含 Name 列作为通道名称')
+      return
+    }
+    const metaIdx = headers.indexOf('metadata')
+
+    const toCreate: any[] = []
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map((cell) => cell.trim().replace(/^["']|["']$/g, ''))
+      const name = cols[nameIdx]
+      if (!name) continue
+      let metadata: any = {}
+      if (metaIdx !== -1 && cols[metaIdx]) {
+        try {
+          metadata = JSON.parse(cols[metaIdx])
+        } catch {
+          // ignore
+        }
+      }
+      toCreate.push({ name, metadata })
+    }
+    if (toCreate.length === 0) {
+      toastError('未能解析到有效的通道数据行')
+      return
+    }
+    bulkCreate.mutate(toCreate)
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -158,6 +216,10 @@ export const ChannelsModule: React.FC = () => {
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)} className="flex items-center gap-1.5 text-xs text-slate-700 bg-white">
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>批量导入通道</span>
           </Button>
           <Button onClick={() => setCreateOpen(true)} className="flex items-center gap-1.5">
             <Plus className="w-4 h-4" />
@@ -443,6 +505,35 @@ export const ChannelsModule: React.FC = () => {
                 <StatusBadge status={d.status} />
               </label>
             ))}
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Bulk Channels Modal */}
+      <Dialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        title="批量导入通信通道"
+        description="支持 CSV 格式批量创建消息通道，快速完成通道集群拓扑初始化"
+      >
+        <div className="space-y-3">
+          <div className="text-xs text-slate-500">
+            第一行为表头，格式：<code>Name,Metadata</code>
+          </div>
+          <Textarea
+            rows={7}
+            placeholder="Name,Metadata&#10;telemetry_sensors,{&quot;topic&quot;:&quot;sensor/data&quot;}&#10;command_control,{&quot;topic&quot;:&quot;cmd/downlink&quot;}"
+            value={csvContent}
+            onChange={(e) => setCsvContent(e.target.value)}
+            className="font-mono text-xs"
+          />
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setBulkOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleImportChannelsCSV} loading={bulkCreate.isPending}>
+              确认导入
+            </Button>
           </div>
         </div>
       </Dialog>

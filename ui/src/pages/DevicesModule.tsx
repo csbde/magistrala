@@ -38,6 +38,8 @@ import {
   Cpu,
   Send,
   Power,
+  Download,
+  FileSpreadsheet,
 } from 'lucide-react'
 
 type TabId = 'general' | 'credentials' | 'channels' | 'telemetry' | 'alarms' | 'journals'
@@ -49,6 +51,12 @@ export const DevicesModule: React.FC = () => {
   const { success, error: toastError } = useToast()
 
   const [search, setSearch] = useState('')
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchTab, setBatchTab] = useState<'csv' | 'generate' | 'export'>('csv')
+  const [csvContent, setCsvContent] = useState('')
+  const [genPrefix, setGenPrefix] = useState('dev_')
+  const [genCount, setGenCount] = useState(10)
+  const [genTags, setGenTags] = useState('batch-import')
   const [statusFilter, setStatusFilter] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [detailDevice, setDetailDevice] = useState<Device | null>(null)
@@ -82,7 +90,22 @@ export const DevicesModule: React.FC = () => {
     enabled: !!currentWorkspace?.id,
   })
 
-  const createMutation = useMutation({
+  const bulkCreateMutation = useMutation({
+    mutationFn: (devices: any[]) =>
+      fetchApi('/api/devices/bulk', {
+        method: 'POST',
+        body: JSON.stringify({ devices }),
+      }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: [...wsKey, 'devices'] })
+      setBatchOpen(false)
+      setCsvContent('')
+      success(`成功批量导入/生成 ${res.created_count || 0} 台设备`)
+    },
+    onError: (e: any) => toastError(e.message || '批量创建失败'),
+  })
+
+    const createMutation = useMutation({
     mutationFn: (payload: any) => fetchApi<Device>('/api/devices', { method: 'POST', body: JSON.stringify(payload) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: wsKey })
@@ -185,6 +208,110 @@ export const DevicesModule: React.FC = () => {
     { id: 'journals', label: '审计日志', icon: ScrollText },
   ]
 
+  const handleExportCSV = () => {
+    if (devices.length === 0) {
+      toastError('当前工作区无设备可导出')
+      return
+    }
+    const headers = ['Name', 'DeviceID', 'SecretKey', 'Type', 'Tags', 'Status']
+    const rows = devices.map((d) => [
+      d.name || '',
+      d.id,
+      d.credentials?.secret || '',
+      d.device_type || (d.is_gateway ? 'gateway' : 'device'),
+      (d.tags || []).join(';'),
+      d.status || 'enabled',
+    ])
+    const csvStr = [headers.join(','), ...rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))].join('\n')
+    const blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `devices_chip_flashing_${currentWorkspace?.id || 'export'}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    success('芯片烧录 CSV 数据文件已生成并下载')
+  }
+
+  const handleDownloadSampleCSV = () => {
+    const sample = 'Name,Secret,Tags,Metadata\nTemperature_Sensor_01,,sensor;workshop_a,{"model":"DHT22"}\nPressure_Meter_02,,meter;pipeline_b,{"range":"0-10bar"}\nGate_Node_03,,lora;gateway,{"freq":"470MHz"}'
+    const blob = new Blob([sample], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'devices_batch_import_sample.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImportCSV = () => {
+    if (!csvContent.trim()) {
+      toastError('请输入或粘贴 CSV 内容')
+      return
+    }
+    const lines = csvContent.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (lines.length < 2) {
+      toastError('CSV 数据至少需要包含标题行与 1 行设备数据')
+      return
+    }
+    const headers = lines[0].split(',').map((h) => h.trim().replace(/^["']|["']$/g, '').toLowerCase())
+    const nameIdx = headers.indexOf('name')
+    if (nameIdx === -1) {
+      toastError('CSV 必须包含 Name 列作为设备名称')
+      return
+    }
+    const secretIdx = headers.indexOf('secret')
+    const tagsIdx = headers.indexOf('tags')
+    const metaIdx = headers.indexOf('metadata')
+
+    const toCreate: any[] = []
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map((cell) => cell.trim().replace(/^["']|["']$/g, ''))
+      const name = cols[nameIdx]
+      if (!name) continue
+      const secret = secretIdx !== -1 ? cols[secretIdx] : undefined
+      const tagsStr = tagsIdx !== -1 ? cols[tagsIdx] : ''
+      const tags = tagsStr ? tagsStr.split(';').map((s) => s.trim()).filter(Boolean) : []
+      let metadata: any = {}
+      if (metaIdx !== -1 && cols[metaIdx]) {
+        try {
+          metadata = JSON.parse(cols[metaIdx])
+        } catch {
+          // ignore
+        }
+      }
+      toCreate.push({
+        name,
+        credentials: secret ? { secret } : undefined,
+        tags,
+        metadata,
+      })
+    }
+    if (toCreate.length === 0) {
+      toastError('未能解析到有效的设备数据行')
+      return
+    }
+    bulkCreateMutation.mutate(toCreate)
+  }
+
+  const handleGenerateBatch = () => {
+    if (genCount <= 0 || genCount > 500) {
+      toastError('单次生成数量请控制在 1 到 500 台之间')
+      return
+    }
+    const toCreate: any[] = []
+    const tags = genTags.split(';').map((s) => s.trim()).filter(Boolean)
+    for (let i = 1; i <= genCount; i++) {
+      const idxStr = String(i).padStart(3, '0')
+      toCreate.push({
+        name: `${genPrefix}${idxStr}`,
+        tags,
+        metadata: { batch: 'auto_generated' },
+      })
+    }
+    bulkCreateMutation.mutate(toCreate)
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -209,6 +336,10 @@ export const DevicesModule: React.FC = () => {
           </Select>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setBatchOpen(true)} className="flex items-center gap-1.5 text-xs text-slate-700 bg-white">
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>批量导入 / 烧录导出</span>
           </Button>
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="w-4 h-4" />
@@ -453,6 +584,108 @@ export const DevicesModule: React.FC = () => {
             {activeTab === 'journals' && <DeviceJournalsTab deviceId={detailDevice.id} />}
           </div>
         )}
+      </Dialog>
+
+      {/* Batch Import & Flashing Export Modal */}
+      <Dialog
+        open={batchOpen}
+        onClose={() => setBatchOpen(false)}
+        title="设备批量管理与芯片烧录数据中心"
+        description="支持 CSV 批量导入设备、批量快速生成凭证，以及导出工厂量产芯片烧录数据"
+      >
+        <div className="space-y-4">
+          <Tabs
+            items={[
+              { id: 'csv', label: 'CSV 批量导入' },
+              { id: 'generate', label: '批量快速生成' },
+              { id: 'export', label: '芯片烧录数据导出' },
+            ]}
+            value={batchTab}
+            onChange={(id) => setBatchTab(id as any)}
+          />
+
+          {batchTab === 'csv' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">粘贴或输入 CSV 数据 (第一行为表头: Name, Secret, Tags, Metadata)</span>
+                <button
+                  type="button"
+                  onClick={handleDownloadSampleCSV}
+                  className="text-blue-600 hover:underline flex items-center gap-1"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>下载样例 CSV 模板</span>
+                </button>
+              </div>
+              <Textarea
+                rows={7}
+                placeholder="Name,Secret,Tags,Metadata&#10;Smart_Meter_01,,smart;water,{&quot;flow&quot;:&quot;DN20&quot;}&#10;Smart_Meter_02,,smart;water,{&quot;flow&quot;:&quot;DN20&quot;}"
+                value={csvContent}
+                onChange={(e) => setCsvContent(e.target.value)}
+                className="font-mono text-xs"
+              />
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setBatchOpen(false)}>
+                  取消
+                </Button>
+                <Button onClick={handleImportCSV} loading={bulkCreateMutation.isPending}>
+                  确认导入
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {batchTab === 'generate' && (
+            <div className="space-y-3">
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                系统将按序号自动批量生成独立凭证的设备记录，并自动分配唯一识别码 (Device ID) 与通信密钥 (Secret)。
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">设备名称前缀 *</label>
+                  <Input value={genPrefix} onChange={(e) => setGenPrefix(e.target.value)} placeholder="例如：device_sensor_" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">批量生成台数 (1-500) *</label>
+                  <Input type="number" min={1} max={500} value={genCount} onChange={(e) => setGenCount(parseInt(e.target.value) || 1)} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">附加标签 (分号分隔)</label>
+                <Input value={genTags} onChange={(e) => setGenTags(e.target.value)} placeholder="workshop_1;lorawan;batch_202611" />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setBatchOpen(false)}>
+                  取消
+                </Button>
+                <Button onClick={handleGenerateBatch} loading={bulkCreateMutation.isPending}>
+                  立即批量生成 {genCount} 台设备
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {batchTab === 'export' && (
+            <div className="space-y-4">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 space-y-1">
+                <div className="font-semibold text-slate-800">工厂批量烧录说明：</div>
+                <p>芯片大批量烧录时，烧录治具/量产编程器读取此 CSV 文件，将每台设备对应的独立 <code>Device ID</code> 与 <code>Secret Key</code> 烧入单片机 Flash/EEPROM 中。</p>
+              </div>
+              <div className="flex items-center justify-between text-xs p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800">
+                <span>当前租户空间下就绪的设备总数: <strong>{devices.length}</strong> 台</span>
+                <Button size="sm" onClick={handleExportCSV} className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700">
+                  <Download className="w-3.5 h-3.5" />
+                  <span>下载芯片烧录数据 (CSV)</span>
+                </Button>
+              </div>
+              <div className="flex justify-end pt-2">
+                <Button variant="outline" onClick={() => setBatchOpen(false)}>
+                  关闭
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       </Dialog>
 
       <ConfirmDialog
