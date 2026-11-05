@@ -167,6 +167,7 @@ export const DashboardsModule: React.FC<{ onNavigate: (tab: string) => void }> =
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <h3 className="text-base font-bold text-slate-800">快捷操作</h3>
           <div className="space-y-2">
+            <button onClick={() => onNavigate('visualDashboards')} className="w-full text-left p-3 rounded-lg border border-blue-200 bg-blue-50/40 hover:border-blue-500 hover:bg-blue-50 transition flex items-center justify-between"><div><div className="text-xs font-semibold text-blue-900">可视化大屏看板与模板</div><div className="text-[11px] text-blue-600">时序折线、半圆仪表盘与全屏大屏</div></div><ArrowUpRight className="w-4 h-4 text-blue-600" /></button>
             <button
               onClick={() => onNavigate('devices')}
               className="w-full text-left p-3 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50/50 transition flex items-center justify-between"

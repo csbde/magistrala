@@ -6,6 +6,7 @@ import { useAuthStore } from './store/authStore'
 import { Login } from './pages/Login'
 import { Layout } from './components/Layout'
 import { DashboardsModule } from './pages/DashboardsModule'
+import { VisualDashboardsModule, DashboardCanvas } from './pages/VisualDashboardsModule'
 import { DevicesModule } from './pages/DevicesModule'
 import { GatewaysModule } from './pages/GatewaysModule'
 import { ChannelsModule } from './pages/ChannelsModule'
@@ -19,6 +20,8 @@ import { RulesModule } from './pages/RulesModule'
 import { CrudModule } from './pages/CrudModule'
 import { ToastProvider } from './components/ui/Toast'
 import { fetchApi } from './lib/api'
+import type { Dashboard } from './types'
+import { Loader2 } from 'lucide-react'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,9 +36,31 @@ export const AppContent: React.FC = () => {
   const { token, setToken, setAuth } = useAuthStore()
   const [currentTab, setCurrentTab] = useState('dashboard')
 
-  // Check URL query parameters for OIDC callback redirect (token & workspace_id)
+  // 支持免密公开大屏分享 (?public_share={token})
+  const [publicShareToken, setPublicShareToken] = useState<string | null>(null)
+  const [publicDashboard, setPublicDashboard] = useState<Dashboard | null>(null)
+  const [publicLoading, setPublicLoading] = useState(false)
+  const [publicError, setPublicError] = useState<string | null>(null)
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
+    const shareParam = params.get('public_share')
+    if (shareParam) {
+      setPublicShareToken(shareParam)
+      setPublicLoading(true)
+      fetch(`/api/public/dashboards/${encodeURIComponent(shareParam)}`)
+        .then(async (res) => {
+          if (!res.ok) {
+            throw new Error(`无法加载免密大屏 (HTTP ${res.status})，可能已被取消共享或链接已失效`)
+          }
+          return res.json()
+        })
+        .then((d) => setPublicDashboard(d))
+        .catch((err) => setPublicError(err.message))
+        .finally(() => setPublicLoading(false))
+    }
+
+    // Check URL query parameters for OIDC callback redirect (token & workspace_id)
     const urlToken = params.get('token')
     const urlWs = params.get('workspace_id')
     if (urlToken) {
@@ -52,6 +77,41 @@ export const AppContent: React.FC = () => {
     }
   }, [setToken, setAuth])
 
+  // 免密公开大屏呈现模式
+  if (publicShareToken) {
+    if (publicLoading) {
+      return (
+        <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-900 text-white space-y-3">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+          <div className="text-sm">正在加载实时免密监控大屏...</div>
+        </div>
+      )
+    }
+    if (publicError || !publicDashboard) {
+      return (
+        <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-900 text-white space-y-4 p-6">
+          <div className="text-red-400 text-lg font-bold">加载免密大屏失败</div>
+          <div className="text-sm text-slate-400 max-w-md text-center">{publicError || '大屏不存在或未开启公开共享'}</div>
+          <a
+            href="/"
+            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
+          >
+            返回主页
+          </a>
+        </div>
+      )
+    }
+    return (
+      <DashboardCanvas
+        dashboard={publicDashboard}
+        readOnly
+        onBack={() => {
+          window.location.href = '/'
+        }}
+      />
+    )
+  }
+
   if (!token) {
     return <Login />
   }
@@ -59,6 +119,7 @@ export const AppContent: React.FC = () => {
   return (
     <Layout currentTab={currentTab} setCurrentTab={setCurrentTab}>
       {currentTab === 'dashboard' && <DashboardsModule onNavigate={setCurrentTab} />}
+      {currentTab === 'visualDashboards' && <VisualDashboardsModule />}
       {currentTab === 'devices' && <DevicesModule />}
       {currentTab === 'certs' && <CertsModule />}
       {currentTab === 'gateways' && <GatewaysModule />}

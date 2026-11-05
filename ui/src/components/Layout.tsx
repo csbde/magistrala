@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   ChevronDown,
   UserCog,
+  BarChart3,
 } from 'lucide-react'
 import { Dialog, Input, Button } from './ui/primitives'
 import { useToast } from './ui/Toast'
@@ -98,6 +99,7 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
     {
       title: '数据与规则',
       items: [
+        { id: 'visualDashboards', label: '可视化大屏看板', icon: BarChart3 },
         { id: 'messages', label: '消息数据中心', icon: Database },
         { id: 'rules', label: t.rules, icon: Workflow },
         { id: 'alarms', label: t.alarms, icon: BellRing },

@@ -128,6 +128,7 @@ func (s *Server) setupRoutes() {
 		api.Get("/auth/oidc/login", s.handleOIDCLogin)
 		api.Get("/auth/oidc/callback", s.handleOIDCCallback)
 		api.Get("/auth/oidc/info", s.handleOIDCInfo)
+		api.Get("/public/dashboards/{shareToken}", s.handleGetPublicDashboard)
 
 		// Protected endpoints
 		api.Group(func(auth chi.Router) {

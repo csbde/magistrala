@@ -1531,6 +1531,20 @@ func (s *Server) handleUpdateDashboard(w http.ResponseWriter, r *http.Request) {
 	renderJSON(w, http.StatusOK, saved)
 }
 
+func (s *Server) handleGetPublicDashboard(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "shareToken")
+	if token == "" {
+		badRequest(w, "share token is required")
+		return
+	}
+	d, err := s.store.GetDashboardByShareToken(token)
+	if err != nil || !d.Shareable {
+		http.Error(w, `{"error":"dashboard not found or public sharing disabled"}`, http.StatusNotFound)
+		return
+	}
+	renderJSON(w, http.StatusOK, d)
+}
+
 func (s *Server) handleDeleteDashboard(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	s.store.DeleteDashboard(id)
