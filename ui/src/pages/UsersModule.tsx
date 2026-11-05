@@ -134,9 +134,9 @@ export const UsersModule: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">用户成员与 Casbin 权限体系</h2>
+          <h2 className="text-xl font-bold text-slate-800">用户成员与权限体系</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Casbin RBAC (g = _, _, _) 针对当前租户 (Domain: {currentWorkspace?.id}) 进行隔离
+            基于工作空间的成员角色授权，当前租户：{currentWorkspace?.name || currentWorkspace?.id}
           </p>
         </div>
         <Button onClick={() => setCreateOpen(true)} className="flex items-center gap-1.5">
@@ -172,7 +172,7 @@ export const UsersModule: React.FC = () => {
                 <th className="py-3 px-4">电子邮箱</th>
                 <th className="py-3 px-4">全局角色</th>
                 <th className="py-3 px-4">状态</th>
-                <th className="py-3 px-4">当前租户角色 (Casbin)</th>
+                <th className="py-3 px-4">当前租户角色</th>
                 <th className="py-3 px-4 text-right">操作</th>
               </tr>
             </thead>
@@ -273,7 +273,7 @@ export const UsersModule: React.FC = () => {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="添加租户成员"
-        description="新建账号或加入当前 Casbin 授权空间"
+        description="新建账号并加入当前租户工作空间"
       >
         <form
           onSubmit={(e) => {
@@ -329,7 +329,7 @@ export const UsersModule: React.FC = () => {
               </Select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">当前租户 Casbin 角色</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">当前租户角色</label>
               <Select
                 value={createForm.workspace_role}
                 onChange={(e) => setCreateForm({ ...createForm, workspace_role: e.target.value })}

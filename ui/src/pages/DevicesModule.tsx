@@ -190,7 +190,7 @@ export const DevicesModule: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-800">{t.devices}</h2>
-          <p className="text-xs text-slate-500 mt-0.5">租户内资源，受 Casbin 细粒度权限保护与租户隔离</p>
+          <p className="text-xs text-slate-500 mt-0.5">租户内资源，受细粒度权限保护与租户空间隔离</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">

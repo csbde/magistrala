@@ -2,14 +2,14 @@ import React, { useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { fetchApi } from '../lib/api'
 import { dict } from '../lib/i18n'
-import { ShieldCheck, LogIn, KeyRound, Loader2, Sparkles } from 'lucide-react'
+import { ShieldCheck, LogIn, KeyRound, Loader2 } from 'lucide-react'
 
 export const Login: React.FC = () => {
   const { setAuth, language, setLanguage } = useAuthStore()
   const t = dict[language]
 
-  const [email, setEmail] = useState('admin@magistrala.local')
-  const [password, setPassword] = useState('12345678')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -41,27 +41,16 @@ export const Login: React.FC = () => {
           <div className="p-3 bg-blue-600 rounded-2xl shadow-lg shadow-blue-500/30 text-white">
             <ShieldCheck className="w-8 h-8" />
           </div>
-          <h2 className="text-3xl font-bold tracking-tight text-white">Magistrala</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-white">物联网平台</h2>
         </div>
         <p className="mt-2 text-center text-sm text-slate-400">
-          物联网后台管理系统 (支持中文 · Casbin 隔离 · OIDC)
+          物联网后台管理系统
         </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-slate-800 py-8 px-4 shadow-xl ring-1 ring-white/10 sm:rounded-2xl sm:px-10">
-          <div className="flex items-center justify-between mb-4">
-            <button
-              type="button"
-              onClick={() => {
-                setEmail('admin@magistrala.local')
-                setPassword('12345678')
-              }}
-              className="text-xs text-slate-400 hover:text-blue-400 flex items-center gap-1 transition"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-              <span>默认管理员账号</span>
-            </button>
+          <div className="flex items-center justify-end mb-4">
             <button
               onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
               className="text-xs text-blue-400 hover:text-blue-300 font-medium px-2 py-1 rounded bg-slate-700/50 border border-slate-600 transition"
@@ -88,7 +77,7 @@ export const Login: React.FC = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   className="block w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
-                  placeholder="admin@magistrala.local"
+                  placeholder="请输入电子邮箱 / 账号"
                 />
               </div>
             </div>
@@ -104,7 +93,7 @@ export const Login: React.FC = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   className="block w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
-                  placeholder="••••••••"
+                  placeholder="请输入登录密码"
                 />
               </div>
             </div>
@@ -138,7 +127,7 @@ export const Login: React.FC = () => {
                 className="flex w-full justify-center items-center gap-2 rounded-lg bg-slate-700 hover:bg-slate-600 px-3 py-2.5 text-sm font-medium text-white shadow-sm border border-slate-600 transition"
               >
                 <KeyRound className="w-4 h-4 text-emerald-400" />
-                {t.ssoLogin}
+                <span>{t.ssoLogin}</span>
               </button>
             </div>
           </div>

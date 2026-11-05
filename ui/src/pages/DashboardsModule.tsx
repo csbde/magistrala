@@ -46,10 +46,10 @@ export const DashboardsModule: React.FC<{ onNavigate: (tab: string) => void }> =
       <div className="p-6 bg-gradient-to-r from-blue-900 via-slate-900 to-indigo-950 rounded-2xl text-white shadow-md flex items-center justify-between">
         <div>
           <span className="text-xs bg-blue-500/20 text-blue-300 font-mono px-2 py-0.5 rounded border border-blue-500/30">
-            多租户完全隔离模式 (Casbin RBAC)
+            多租户空间隔离模式
           </span>
           <h2 className="text-2xl font-bold mt-2">
-            欢迎使用 Magistrala 物联网管理平台
+            欢迎使用物联网管理平台
           </h2>
           <p className="text-xs text-slate-300 mt-1 max-w-xl">
             当前处于工作空间: <span className="text-blue-300 font-semibold">{currentWorkspace?.name}</span> ({currentWorkspace?.alias || currentWorkspace?.id})，

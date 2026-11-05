@@ -23,7 +23,7 @@ export const BrokerHubModule: React.FC = () => {
   const fluxmqConfigYaml = `# FluxMQ Webhook 认证与鉴权配置示例 (fluxmq.yaml)
 auth:
   http:
-    # 设备登录认证 Webhook (Magistrala 单文件后台)
+    # 设备登录认证 Webhook (物联网平台后台服务)
     auth_req:
       url: "http://127.0.0.1:8080/api/auth/mqtt"
       method: "post"
@@ -35,7 +35,7 @@ auth:
         password: "%p"
         ipaddress: "%a"
 
-    # 通道发布/订阅鉴权 Webhook (基于 Magistrala 绑定关系)
+    # 通道发布/订阅鉴权 Webhook (基于平台通道绑定关系)
     acl_req:
       url: "http://127.0.0.1:8080/api/auth/mqtt/acl"
       method: "post"
@@ -53,7 +53,7 @@ auth:
         <h2 className="text-xl font-bold text-slate-800">FluxMQ / MQTT 接入与集成中心</h2>
         <p className="text-xs text-slate-500 mt-1">
           当前空间: <span className="font-mono text-blue-600 font-semibold">{currentWorkspace?.name}</span>。
-          单文件后台监听 HTTP 8080 端口，FluxMQ 监听 1883/8883/8083 端口并通过 Webhook 委托 Magistrala 完成设备认证与通道鉴权。
+          单文件后台监听 HTTP 8080 端口，FluxMQ 监听 1883/8883/8083 端口并通过 Webhook 委托物联网平台后台完成设备认证与通道鉴权。
         </p>
       </div>
 
@@ -62,11 +62,11 @@ auth:
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-2">
           <div className="flex items-center gap-2 text-blue-600 font-semibold text-sm">
             <Server className="w-4 h-4" />
-            <span>Magistrala 单文件后台</span>
+            <span>物联网平台后台服务</span>
           </div>
           <div className="text-2xl font-bold text-slate-800">8080</div>
           <p className="text-xs text-slate-500">
-            HTTP 管理后台、OIDC SSO、Casbin 租户隔离、Webhook 认证中心
+            HTTP 管理后台、SSO 单点登录、多租户空间隔离、Webhook 认证中心
           </p>
           <div className="text-[11px] font-mono text-emerald-600 bg-emerald-50 px-2 py-1 rounded inline-block">
             HTTP /api/auth/mqtt (活跃)
@@ -109,7 +109,7 @@ auth:
           <span>FluxMQ Webhook 认证对接规范</span>
         </h3>
         <p className="text-xs text-slate-600 leading-relaxed">
-          FluxMQ 收到设备连接请求时，自动向 Magistrala 发起 HTTP POST 请求验证设备身份；发布或订阅主题时，验证设备是否连接到该通道。
+          FluxMQ 收到设备连接请求时，自动向后台服务发起 HTTP POST 请求验证设备身份；发布或订阅主题时，验证设备是否连接到该通道。
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">

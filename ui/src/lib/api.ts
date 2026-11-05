@@ -25,7 +25,7 @@ export async function fetchApi<T = any>(endpoint: string, options: RequestInit =
   }
 
   if (res.status === 403) {
-    throw new Error('Casbin 权限拒绝：当前角色在此工作区无权执行此操作')
+    throw new Error('权限拒绝：当前角色在此工作区无权执行此操作')
   }
 
   if (!res.ok) {

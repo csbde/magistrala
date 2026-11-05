@@ -121,7 +121,7 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
           {/* Logo */}
           <div className="h-16 flex items-center px-6 gap-3 border-b border-slate-800">
             <Layers className="w-6 h-6 text-blue-500" />
-            <span className="font-bold text-lg text-white tracking-wide">Magistrala</span>
+            <span className="font-bold text-lg text-white tracking-wide">物联网平台</span>
             <span className="text-[10px] bg-blue-500/20 text-blue-400 font-mono px-1.5 py-0.5 rounded border border-blue-500/30">
               v1.0
             </span>
@@ -133,7 +133,7 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
               <span>{t.workspaces}</span>
               <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded flex items-center gap-1">
                 <ShieldCheck className="w-3 h-3" />
-                <span>Casbin 隔离</span>
+                <span>空间隔离</span>
               </span>
             </div>
             <div className="relative">
@@ -300,7 +300,7 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
               type="email"
               value={profileEmail}
               onChange={(e) => setProfileEmail(e.target.value)}
-              placeholder="admin@magistrala.local"
+              placeholder="user@example.com"
             />
           </div>
           <div className="pt-2 border-t border-slate-200 space-y-3">

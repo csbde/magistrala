@@ -86,7 +86,7 @@ export const CrudModule: React.FC<CrudModuleProps> = ({
         <div>
           <h2 className="text-xl font-bold text-slate-800">{title}</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            租户内资源，受 Casbin 细粒度权限保护与租户隔离
+            租户内资源，受细粒度权限保护与租户空间隔离
           </p>
         </div>
         <Button

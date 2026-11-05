@@ -228,7 +228,7 @@ export const WorkspacesModule: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-slate-800">多租户工作区与空间隔离 (Multi-Tenancy)</h2>
           <p className="text-xs text-slate-500 mt-1">
-            为不同客户、子公司或项目划分专属的物联网物理/逻辑资源域，支持独立的 Casbin 成员授权体系
+            为不同客户、子公司或项目划分专属的物联网物理/逻辑资源域，支持独立的成员授权体系
           </p>
         </div>
         <Button onClick={() => setCreateOpen(true)} className="flex items-center gap-1.5">
@@ -314,7 +314,7 @@ export const WorkspacesModule: React.FC = () => {
                           size="sm"
                           onClick={() => setMembersOpenWs(ws)}
                           className="flex items-center gap-1 text-xs text-blue-700 bg-blue-50/60 border-blue-200 hover:bg-blue-100"
-                          title="管理租户绑定的用户成员及 Casbin 角色"
+                          title="管理租户绑定的用户成员及角色"
                         >
                           <Users className="w-3.5 h-3.5 text-blue-600" />
                           <span>成员管理</span>
@@ -364,7 +364,7 @@ export const WorkspacesModule: React.FC = () => {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="新建租户工作区 (Tenant Workspace)"
-        description="创建独立的租户物理/逻辑空间，拥有完全隔离的设备凭证与 Casbin 权限域"
+        description="创建独立的租户物理/逻辑空间，拥有完全隔离的设备凭证与权限域"
       >
         <form onSubmit={handleCreate} className="space-y-4">
           <div>
@@ -455,7 +455,7 @@ export const WorkspacesModule: React.FC = () => {
         open={!!membersOpenWs}
         onClose={() => setMembersOpenWs(null)}
         title={`租户成员与授权管理 — ${membersOpenWs?.name}`}
-        description={`租户 ID: ${membersOpenWs?.id} | 别名: ${membersOpenWs?.alias || '-'} | 管理本空间的 Casbin 授权与成员绑定`}
+        description={`租户 ID: ${membersOpenWs?.id} | 别名: ${membersOpenWs?.alias || '-'} | 管理本空间的授权与成员绑定`}
       >
         <div className="space-y-5">
           {/* Add / Bind user section */}
