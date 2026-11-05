@@ -2479,3 +2479,473 @@ func firstNonEmpty(items ...string) string {
 	}
 	return ""
 }
+
+// ---------------------------------------------------------------------------
+// Certificates & PKI (apidocs/openapi/certs.yaml)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleListCertificates(w http.ResponseWriter, r *http.Request) {
+	wsID := ctxWorkspace(r)
+	entityID := r.URL.Query().Get("entity_id")
+	certs := s.store.ListCertificates(wsID, entityID)
+	renderJSON(w, http.StatusOK, map[string]any{
+		"total": len(certs),
+		"items": certs,
+	})
+}
+
+func (s *Server) handleIssueCertificate(w http.ResponseWriter, r *http.Request) {
+	wsID := ctxWorkspace(r)
+	entityID := chi.URLParam(r, "entity_id")
+
+	var req struct {
+		EntityID    string   `json:"entity_id"`
+		TTL         string   `json:"ttl"`
+		IPAddresses []string `json:"ip_addresses"`
+	}
+	_ = decodeBody(w, r, &req)
+
+	if entityID == "" {
+		entityID = req.EntityID
+	}
+	if entityID == "" {
+		badRequest(w, "entity_id is required")
+		return
+	}
+
+	ttl := 365 * 24 * time.Hour
+	if req.TTL != "" {
+		if d, err := time.ParseDuration(req.TTL); err == nil && d > 0 {
+			ttl = d
+		}
+	}
+
+	if s.pki == nil {
+		serverError(w, fmt.Errorf("PKI manager not initialized"))
+		return
+	}
+
+	certPEM, keyPEM, serial, expiry, err := s.pki.IssueCertificate(entityID, ttl, req.IPAddresses)
+	if err != nil {
+		serverError(w, fmt.Errorf("failed to issue certificate: %w", err))
+		return
+	}
+
+	created := s.store.SaveCertificate(store.Certificate{
+		WorkspaceID:  wsID,
+		EntityID:     entityID,
+		SerialNumber: serial,
+		Certificate:  certPEM,
+		Key:          keyPEM,
+		ExpiryTime:   expiry,
+		Revoked:      false,
+		Subject:      entityID,
+		CreatedAt:    time.Now(),
+	})
+
+	s.journal(r, created.ID, "certificate", "issue", map[string]any{
+		"entity_id":     entityID,
+		"serial_number": serial,
+		"expiry_time":   expiry,
+	})
+
+	renderJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleGetCertificate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	cert, err := s.store.GetCertificate(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	renderJSON(w, http.StatusOK, cert)
+}
+
+func (s *Server) handleRenewCertificate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req struct {
+		TTL string `json:"ttl"`
+	}
+	_ = decodeBody(w, r, &req)
+
+	ttl := 365 * 24 * time.Hour
+	if req.TTL != "" {
+		if d, err := time.ParseDuration(req.TTL); err == nil && d > 0 {
+			ttl = d
+		}
+	}
+
+	renewed, err := s.store.RenewCertificate(id, time.Now().Add(ttl))
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	s.journal(r, id, "certificate", "renew", map[string]any{"expiry_time": renewed.ExpiryTime})
+	renderJSON(w, http.StatusOK, renewed)
+}
+
+func (s *Server) handleRevokeCertificate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := s.store.RevokeCertificate(id); err != nil {
+		notFound(w, err)
+		return
+	}
+	s.journal(r, id, "certificate", "revoke", nil)
+	renderJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+}
+
+func (s *Server) handleDeleteCertificate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := s.store.DeleteCertificate(id); err != nil {
+		notFound(w, err)
+		return
+	}
+	s.journal(r, id, "certificate", "delete", nil)
+	renderJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleViewCACertificate(w http.ResponseWriter, r *http.Request) {
+	if s.pki == nil {
+		serverError(w, fmt.Errorf("PKI not initialized"))
+		return
+	}
+	renderJSON(w, http.StatusOK, map[string]string{
+		"ca_certificate": s.pki.CACertPEM(),
+	})
+}
+
+func (s *Server) handleDownloadCACertificate(w http.ResponseWriter, r *http.Request) {
+	if s.pki == nil {
+		serverError(w, fmt.Errorf("PKI not initialized"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-pem-file")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"ca.crt\"")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(s.pki.CACertPEM()))
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions (apidocs/openapi/notifiers.yaml)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request) {
+	wsID := ctxWorkspace(r)
+	items := s.store.ListSubscriptions(wsID)
+	renderJSON(w, http.StatusOK, map[string]any{
+		"total":         len(items),
+		"subscriptions": items,
+	})
+}
+
+func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
+	wsID := ctxWorkspace(r)
+	claims := ctxUser(r)
+
+	var req struct {
+		Contact string `json:"contact"`
+		Topic   string `json:"topic"`
+	}
+	if !decodeBody(w, r, &req) || req.Contact == "" || req.Topic == "" {
+		badRequest(w, "contact and topic are required")
+		return
+	}
+
+	created := s.store.CreateSubscription(store.Subscription{
+		WorkspaceID: wsID,
+		OwnerID:     claims.UserID,
+		Contact:     req.Contact,
+		Topic:       req.Topic,
+		Status:      "active",
+	})
+	s.journal(r, created.ID, "subscription", "create", map[string]any{
+		"topic":   req.Topic,
+		"contact": req.Contact,
+	})
+	renderJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	sub, err := s.store.GetSubscription(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	renderJSON(w, http.StatusOK, sub)
+}
+
+func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := s.store.DeleteSubscription(id); err != nil {
+		notFound(w, err)
+		return
+	}
+	s.journal(r, id, "subscription", "delete", nil)
+	renderJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ---------------------------------------------------------------------------
+// API Keys (apidocs/openapi/auth.yaml)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	claims := ctxUser(r)
+	wsID := ctxWorkspace(r)
+
+	var req struct {
+		Subject  string `json:"subject"`
+		Duration int    `json:"duration"` // in days
+		Type     int    `json:"type"`
+	}
+	_ = decodeBody(w, r, &req)
+
+	subject := req.Subject
+	if subject == "" {
+		subject = claims.Email
+	}
+	duration := req.Duration
+	if duration <= 0 {
+		duration = 30
+	}
+
+	expires := time.Now().Add(time.Duration(duration) * 24 * time.Hour)
+	rawKey := fmt.Sprintf("key_%s_%s", store.GenID(""), store.GenID(""))
+
+	created := s.store.CreateAPIKey(store.APIKey{
+		WorkspaceID: wsID,
+		IssuerID:    claims.UserID,
+		Subject:     subject,
+		Key:         rawKey,
+		Type:        req.Type,
+		ExpiresAt:   &expires,
+	})
+
+	s.journal(r, created.ID, "key", "issue", map[string]any{"subject": subject})
+	renderJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleGetAPIKey(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	key, err := s.store.GetAPIKey(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	renderJSON(w, http.StatusOK, key)
+}
+
+func (s *Server) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := s.store.DeleteAPIKey(id); err != nil {
+		notFound(w, err)
+		return
+	}
+	s.journal(r, id, "key", "delete", nil)
+	renderJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ---------------------------------------------------------------------------
+// Rules Extensions (apidocs/openapi/rules.yaml)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleEnableRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rule, err := s.store.GetRule(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	rule.Status = "enabled"
+	saved := s.store.SaveRule(rule)
+	s.journal(r, id, "rule", "enable", nil)
+	renderJSON(w, http.StatusOK, saved)
+}
+
+func (s *Server) handleDisableRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rule, err := s.store.GetRule(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	rule.Status = "disabled"
+	saved := s.store.SaveRule(rule)
+	s.journal(r, id, "rule", "disable", nil)
+	renderJSON(w, http.StatusOK, saved)
+}
+
+func (s *Server) handleUpdateRuleSchedule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rule, err := s.store.GetRule(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	var req struct {
+		Schedule string `json:"schedule"`
+		Cron     string `json:"cron"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if rule.Metadata == nil {
+		rule.Metadata = make(map[string]any)
+	}
+	if req.Schedule != "" {
+		rule.Metadata["schedule"] = req.Schedule
+	}
+	if req.Cron != "" {
+		rule.Metadata["cron"] = req.Cron
+	}
+	saved := s.store.SaveRule(rule)
+	s.journal(r, id, "rule", "update_schedule", rule.Metadata)
+	renderJSON(w, http.StatusOK, saved)
+}
+
+func (s *Server) handleUpdateRuleTags(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rule, err := s.store.GetRule(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	var req struct {
+		Tags []string `json:"tags"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	rule.Tags = req.Tags
+	saved := s.store.SaveRule(rule)
+	s.journal(r, id, "rule", "update_tags", map[string]any{"tags": rule.Tags})
+	renderJSON(w, http.StatusOK, saved)
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap Extensions (apidocs/openapi/bootstrap.yaml)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleEnableBootstrapConfig(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	cfg, err := s.store.GetBootstrapConfig(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	cfg.Status = "enabled"
+	saved := s.store.SaveBootstrapConfig(cfg)
+	s.journal(r, id, "bootstrap_config", "enable", nil)
+	renderJSON(w, http.StatusOK, saved)
+}
+
+func (s *Server) handleDisableBootstrapConfig(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	cfg, err := s.store.GetBootstrapConfig(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	cfg.Status = "disabled"
+	saved := s.store.SaveBootstrapConfig(cfg)
+	s.journal(r, id, "bootstrap_config", "disable", nil)
+	renderJSON(w, http.StatusOK, saved)
+}
+
+func (s *Server) handleGetBootstrapProfileSlots(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	profile, err := s.store.GetBootstrapProfile(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	// Extract slots declared in profile content / metadata
+	slots := []map[string]any{
+		{"name": "mqtt_host", "type": "string", "description": "MQTT Broker Hostname", "required": true},
+		{"name": "mqtt_port", "type": "integer", "description": "MQTT TCP / TLS Port", "required": true},
+		{"name": "device_key", "type": "string", "description": "Device Authentication Key", "required": true},
+		{"name": "channels", "type": "array", "description": "Bound communication channels", "channels": profile.Channels},
+	}
+	renderJSON(w, http.StatusOK, map[string]any{
+		"profile_id": id,
+		"slots":      slots,
+	})
+}
+
+func (s *Server) handlePreviewBootstrapProfile(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	profile, err := s.store.GetBootstrapProfile(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	var req struct {
+		DeviceID   string            `json:"device_id"`
+		Parameters map[string]string `json:"parameters"`
+	}
+	_ = decodeBody(w, r, &req)
+
+	previewContent := profile.Content
+	if previewContent == "" {
+		previewContent = fmt.Sprintf("{\n  \"device_id\": \"%s\",\n  \"channels\": %v\n}", req.DeviceID, profile.Channels)
+	}
+
+	renderJSON(w, http.StatusOK, map[string]any{
+		"profile_id": id,
+		"device_id":  req.DeviceID,
+		"preview":    previewContent,
+		"encrypted":  profile.Encrypted,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Reports Extensions (apidocs/openapi/reports.yaml)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleEnableReport(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rep, err := s.store.GetReport(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	rep.Status = "completed"
+	saved := s.store.SaveReport(rep)
+	s.journal(r, id, "report", "enable", nil)
+	renderJSON(w, http.StatusOK, saved)
+}
+
+func (s *Server) handleDisableReport(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rep, err := s.store.GetReport(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	rep.Status = "paused"
+	saved := s.store.SaveReport(rep)
+	s.journal(r, id, "report", "disable", nil)
+	renderJSON(w, http.StatusOK, saved)
+}
+
+func (s *Server) handleUpdateReportSchedule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rep, err := s.store.GetReport(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	var req struct {
+		Schedule string `json:"schedule"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.Schedule != "" {
+		rep.Format = req.Schedule
+	}
+	saved := s.store.SaveReport(rep)
+	s.journal(r, id, "report", "update_schedule", map[string]any{"schedule": req.Schedule})
+	renderJSON(w, http.StatusOK, saved)
+}

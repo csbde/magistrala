@@ -15,7 +15,7 @@ import {
   Badge,
   EmptyState,
 } from '../components/ui/primitives'
-import { Plus, Trash2, Cpu, Settings2, KeyRound } from 'lucide-react'
+import { Plus, Trash2, Cpu, Settings2, KeyRound, Play, Pause } from 'lucide-react'
 import { useToast } from '../components/ui/Toast'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 
@@ -95,7 +95,17 @@ export const BootstrapModule: React.FC = () => {
     onError: (e: any) => toastError(e.message || '添加映射失败'),
   })
 
-  const deleteConfig = useMutation({
+  const toggleConfig = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      fetchApi(`/api/bootstraps/configs/${id}/${enabled ? "enable" : "disable"}`, { method: "POST" }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: [...wsKey, "configs"] })
+      success(vars.enabled ? "引导映射已启用" : "引导映射已停用")
+    },
+    onError: (e: any) => toastError(e.message || "操作失败"),
+  })
+
+    const deleteConfig = useMutation({
     mutationFn: (id: string) => fetchApi(`/api/bootstraps/configs/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [...wsKey, 'configs'] })
@@ -252,13 +262,26 @@ export const BootstrapModule: React.FC = () => {
                       <StatusBadge status={c.status} />
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => setDeleteConfigId(c.id)}
-                        className="text-slate-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition"
-                        title={t.delete}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => toggleConfig.mutate({ id: c.id, enabled: c.status !== "enabled" })}
+                          className={`p-1 rounded transition ${
+                            c.status === "enabled"
+                              ? "text-emerald-600 hover:bg-emerald-50"
+                              : "text-slate-400 hover:bg-slate-100"
+                          }`}
+                          title={c.status === "enabled" ? "点击停用映射" : "点击启用映射"}
+                        >
+                          {c.status === "enabled" ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfigId(c.id)}
+                          className="text-slate-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition"
+                          title={t.delete}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

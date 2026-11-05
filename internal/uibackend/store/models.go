@@ -287,6 +287,41 @@ type PAT struct {
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
+type Certificate struct {
+	ID           string     `json:"id"`
+	WorkspaceID  string     `json:"workspace_id"`
+	EntityID     string     `json:"entity_id"`
+	SerialNumber string     `json:"serial_number"`
+	Certificate  string     `json:"certificate"`
+	Key          string     `json:"key,omitempty"`
+	ExpiryTime   time.Time  `json:"expiry_time"`
+	Revoked      bool       `json:"revoked"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+	Subject      string     `json:"subject"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+type Subscription struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	OwnerID     string    `json:"owner_id"`
+	Contact     string    `json:"contact"`
+	Topic       string    `json:"topic"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type APIKey struct {
+	ID          string     `json:"id"`
+	WorkspaceID string     `json:"workspace_id,omitempty"`
+	IssuerID    string     `json:"issuer_id"`
+	Subject     string     `json:"subject"`
+	Key         string     `json:"key"`
+	Type        int        `json:"type"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
 type SupportTicket struct {
 	ID        string         `json:"id"`
 	UserID    string         `json:"user_id"`
@@ -426,6 +461,25 @@ type Storage interface {
 	// Support
 	CreateSupportTicket(t SupportTicket) SupportTicket
 	ListSupportTickets(userID string) []SupportTicket
+
+	// Certificates
+	ListCertificates(wsID, entityID string) []Certificate
+	GetCertificate(id string) (Certificate, error)
+	SaveCertificate(c Certificate) Certificate
+	RevokeCertificate(id string) error
+	RenewCertificate(id string, expiry time.Time) (Certificate, error)
+	DeleteCertificate(id string) error
+
+	// Subscriptions
+	ListSubscriptions(wsID string) []Subscription
+	GetSubscription(id string) (Subscription, error)
+	CreateSubscription(s Subscription) Subscription
+	DeleteSubscription(id string) error
+
+	// API Keys
+	CreateAPIKey(k APIKey) APIKey
+	GetAPIKey(id string) (APIKey, error)
+	DeleteAPIKey(id string) error
 
 	// System Settings
 	GetSetting(key, defaultVal string) string

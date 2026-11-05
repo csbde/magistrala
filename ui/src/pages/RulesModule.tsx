@@ -18,6 +18,8 @@ import {
   Globe,
   BellRing,
   ArrowRight,
+  Play,
+  Pause,
 } from 'lucide-react'
 import { useToast } from '../components/ui/Toast'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -81,7 +83,19 @@ export const RulesModule: React.FC = () => {
     onError: (e: any) => toastError(e.message || '创建规则失败'),
   })
 
-  const deleteMutation = useMutation({
+  const toggleRuleMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      fetchApi(`/api/rules/${id}/${enabled ? "enable" : "disable"}`, {
+        method: "POST",
+      }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["/api/rules"] })
+      success(vars.enabled ? "规则已启用" : "规则已停用")
+    },
+    onError: (e: any) => toastError(e.message || "操作失败"),
+  })
+
+    const deleteMutation = useMutation({
     mutationFn: (id: string) => fetchApi(`/api/rules/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['/api/rules'] })
@@ -209,13 +223,26 @@ export const RulesModule: React.FC = () => {
                       <StatusBadge status={r.status} />
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => setDeleteTargetId(r.id)}
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => toggleRuleMutation.mutate({ id: r.id, enabled: r.status !== "enabled" })}
+                          className={`p-1.5 rounded transition ${
+                            r.status === "enabled"
+                              ? "text-emerald-600 hover:bg-emerald-50"
+                              : "text-slate-400 hover:bg-slate-100"
+                          }`}
+                          title={r.status === "enabled" ? "点击停用规则" : "点击启用规则"}
+                        >
+                          {r.status === "enabled" ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => setDeleteTargetId(r.id)}
                         className="text-slate-400 hover:text-red-600 p-1.5 rounded hover:bg-red-50 transition"
                         title="删除规则"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      </div>
                     </td>
                   </tr>
                 )

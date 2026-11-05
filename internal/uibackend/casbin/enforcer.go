@@ -71,6 +71,12 @@ func (m *Manager) initDefaultPolicies() error {
 		{"role:admin", "*", "/api/users", ".*"},
 		{"role:admin", "*", "/api/roles/*", ".*"},
 		{"role:admin", "*", "/api/roles", ".*"},
+		{"role:admin", "*", "/api/certs/*", ".*"},
+		{"role:admin", "*", "/api/certs", ".*"},
+		{"role:admin", "*", "/api/subscriptions/*", ".*"},
+		{"role:admin", "*", "/api/subscriptions", ".*"},
+		{"role:admin", "*", "/api/keys/*", ".*"},
+		{"role:admin", "*", "/api/keys", ".*"},
 
 		// Editor can read and modify entities, but cannot delete or manage roles
 		{"role:editor", "*", "/api/devices/*", "GET|POST|PUT|PATCH"},
@@ -91,6 +97,12 @@ func (m *Manager) initDefaultPolicies() error {
 		{"role:editor", "*", "/api/workspaces", "GET"},
 		{"role:editor", "*", "/api/users/*", "GET"},
 		{"role:editor", "*", "/api/users", "GET"},
+		{"role:editor", "*", "/api/certs/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/certs", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/subscriptions/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/subscriptions", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/keys/*", "GET|POST|PUT|PATCH"},
+		{"role:editor", "*", "/api/keys", "GET|POST|PUT|PATCH"},
 
 		// Viewer can only read
 		{"role:viewer", "*", "/api/devices/*", "GET"},
@@ -111,6 +123,12 @@ func (m *Manager) initDefaultPolicies() error {
 		{"role:viewer", "*", "/api/workspaces", "GET"},
 		{"role:viewer", "*", "/api/users/*", "GET"},
 		{"role:viewer", "*", "/api/users", "GET"},
+		{"role:viewer", "*", "/api/certs/*", "GET"},
+		{"role:viewer", "*", "/api/certs", "GET"},
+		{"role:viewer", "*", "/api/subscriptions/*", "GET"},
+		{"role:viewer", "*", "/api/subscriptions", "GET"},
+		{"role:viewer", "*", "/api/keys/*", "GET"},
+		{"role:viewer", "*", "/api/keys", "GET"},
 	}
 
 	for _, p := range policies {

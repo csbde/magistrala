@@ -15,6 +15,7 @@ import (
 
 	"github.com/absmach/magistrala/internal/uibackend/casbin"
 	"github.com/absmach/magistrala/internal/uibackend/oidc"
+	"github.com/absmach/magistrala/internal/uibackend/pki"
 	"github.com/absmach/magistrala/internal/uibackend/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -27,6 +28,7 @@ type Server struct {
 	store      store.Storage
 	casbin     *casbin.Manager
 	oidcSvc    *oidc.Service
+	pki        *pki.Manager
 	jwtSecret  []byte
 	distFS     fs.FS
 }
@@ -56,11 +58,20 @@ func NewServer(storage store.Storage, casbinMgr *casbin.Manager, oidcConfig *oid
 		}
 	}
 
+		caCertPEM := storage.GetSetting("pki_ca_cert", "")
+	caKeyPEM := storage.GetSetting("pki_ca_key", "")
+	pkiMgr, _ := pki.NewManager(caCertPEM, caKeyPEM)
+	if pkiMgr != nil && caCertPEM == "" {
+		_ = storage.SetSetting("pki_ca_cert", pkiMgr.CACertPEM())
+		_ = storage.SetSetting("pki_ca_key", pkiMgr.CAKeyPEM())
+	}
+
 	s := &Server{
 		router:    chi.NewRouter(),
 		store:     storage,
 		casbin:    casbinMgr,
 		oidcSvc:   oidcSvc,
+		pki:       pkiMgr,
 		jwtSecret: jwtSecret,
 		distFS:    distFS,
 	}
@@ -259,6 +270,45 @@ func (s *Server) setupRoutes() {
 				scoped.Get("/roles", s.handleListRoles)
 				scoped.Post("/roles/assign", s.handleAssignRole)
 				scoped.Post("/roles/revoke", s.handleRevokeRole)
+
+				// Certificates & PKI (as in certs.yaml)
+				scoped.Get("/certs", s.handleListCertificates)
+				scoped.Post("/certs/issue/{entity_id}", s.handleIssueCertificate)
+				scoped.Post("/certs", s.handleIssueCertificate)
+				scoped.Get("/certs/{id}", s.handleGetCertificate)
+				scoped.Patch("/certs/{id}/renew", s.handleRenewCertificate)
+				scoped.Patch("/certs/{id}/revoke", s.handleRevokeCertificate)
+				scoped.Delete("/certs/{id}", s.handleDeleteCertificate)
+				scoped.Get("/certs/view-ca", s.handleViewCACertificate)
+				scoped.Get("/certs/download-ca", s.handleDownloadCACertificate)
+
+				// Subscriptions (Notifiers as in notifiers.yaml)
+				scoped.Get("/subscriptions", s.handleListSubscriptions)
+				scoped.Post("/subscriptions", s.handleCreateSubscription)
+				scoped.Get("/subscriptions/{id}", s.handleGetSubscription)
+				scoped.Delete("/subscriptions/{id}", s.handleDeleteSubscription)
+
+				// API Keys (as in auth.yaml)
+				scoped.Post("/keys", s.handleCreateAPIKey)
+				scoped.Get("/keys/{id}", s.handleGetAPIKey)
+				scoped.Delete("/keys/{id}", s.handleDeleteAPIKey)
+
+				// Rules extensions (as in rules.yaml)
+				scoped.Post("/rules/{id}/enable", s.handleEnableRule)
+				scoped.Post("/rules/{id}/disable", s.handleDisableRule)
+				scoped.Patch("/rules/{id}/schedule", s.handleUpdateRuleSchedule)
+				scoped.Patch("/rules/{id}/tags", s.handleUpdateRuleTags)
+
+				// Bootstrap extensions (as in bootstrap.yaml)
+				scoped.Post("/bootstraps/configs/{id}/enable", s.handleEnableBootstrapConfig)
+				scoped.Post("/bootstraps/configs/{id}/disable", s.handleDisableBootstrapConfig)
+				scoped.Get("/bootstraps/profiles/{id}/slots", s.handleGetBootstrapProfileSlots)
+				scoped.Post("/bootstraps/profiles/{id}/render-preview", s.handlePreviewBootstrapProfile)
+
+				// Reports extensions (as in reports.yaml)
+				scoped.Post("/reports/{id}/enable", s.handleEnableReport)
+				scoped.Post("/reports/{id}/disable", s.handleDisableReport)
+				scoped.Patch("/reports/{id}/schedule", s.handleUpdateReportSchedule)
 
 				// PATs
 				scoped.Get("/pats", s.handleListPATs)

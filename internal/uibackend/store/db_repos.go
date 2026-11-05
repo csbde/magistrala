@@ -1611,3 +1611,215 @@ func (s *DBStore) GetAllSettings() map[string]string {
 	}
 	return res
 }
+
+// ---------------------------------------------------------------------------
+// Certificates
+// ---------------------------------------------------------------------------
+
+func toCertificate(r certificateRow) Certificate {
+	return Certificate{
+		ID:           r.ID,
+		WorkspaceID:  r.WorkspaceID,
+		EntityID:     r.EntityID,
+		SerialNumber: r.SerialNumber,
+		Certificate:  r.Certificate,
+		Key:          r.Key,
+		ExpiryTime:   r.ExpiryTime,
+		Revoked:      r.Revoked,
+		RevokedAt:    r.RevokedAt,
+		Subject:      r.Subject,
+		CreatedAt:    r.CreatedAt,
+	}
+}
+
+func (s *DBStore) ListCertificates(wsID, entityID string) []Certificate {
+	var rows []certificateRow
+	q := s.db.Order("created_at desc")
+	if wsID != "" {
+		q = q.Where("workspace_id = ?", wsID)
+	}
+	if entityID != "" {
+		q = q.Where("entity_id = ?", entityID)
+	}
+	q.Find(&rows)
+	items := make([]Certificate, len(rows))
+	for i, r := range rows {
+		items[i] = toCertificate(r)
+	}
+	return items
+}
+
+func (s *DBStore) GetCertificate(id string) (Certificate, error) {
+	var r certificateRow
+	if err := s.db.First(&r, "id = ?", id).Error; err != nil {
+		if isNotFound(err) {
+			return Certificate{}, ErrNotFound
+		}
+		return Certificate{}, err
+	}
+	return toCertificate(r), nil
+}
+
+func (s *DBStore) SaveCertificate(c Certificate) Certificate {
+	if c.ID == "" {
+		c.ID = GenID("cert")
+	}
+	row := certificateRow{
+		ID:           c.ID,
+		WorkspaceID:  c.WorkspaceID,
+		EntityID:     c.EntityID,
+		SerialNumber: c.SerialNumber,
+		Certificate:  c.Certificate,
+		Key:          c.Key,
+		ExpiryTime:   c.ExpiryTime,
+		Revoked:      c.Revoked,
+		RevokedAt:    c.RevokedAt,
+		Subject:      c.Subject,
+		CreatedAt:    c.CreatedAt,
+	}
+	var existing certificateRow
+	if s.db.First(&existing, "id = ?", c.ID).Error == nil {
+		row.CreatedAt = existing.CreatedAt
+	} else {
+		row.CreatedAt = time.Now()
+	}
+	s.db.Save(&row)
+	out, _ := s.GetCertificate(c.ID)
+	return out
+}
+
+func (s *DBStore) RevokeCertificate(id string) error {
+	now := time.Now()
+	return s.db.Model(&certificateRow{}).Where("id = ?", id).Updates(map[string]any{
+		"revoked":    true,
+		"revoked_at": &now,
+	}).Error
+}
+
+func (s *DBStore) RenewCertificate(id string, expiry time.Time) (Certificate, error) {
+	if err := s.db.Model(&certificateRow{}).Where("id = ?", id).Update("expiry_time", expiry).Error; err != nil {
+		return Certificate{}, err
+	}
+	return s.GetCertificate(id)
+}
+
+func (s *DBStore) DeleteCertificate(id string) error {
+	return s.db.Delete(&certificateRow{}, "id = ?", id).Error
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions (Notifiers)
+// ---------------------------------------------------------------------------
+
+func toSubscription(r subscriptionRow) Subscription {
+	return Subscription{
+		ID:          r.ID,
+		WorkspaceID: r.WorkspaceID,
+		OwnerID:     r.OwnerID,
+		Contact:     r.Contact,
+		Topic:       r.Topic,
+		Status:      r.Status,
+		CreatedAt:   r.CreatedAt,
+	}
+}
+
+func (s *DBStore) ListSubscriptions(wsID string) []Subscription {
+	var rows []subscriptionRow
+	q := s.db.Order("created_at desc")
+	if wsID != "" {
+		q = q.Where("workspace_id = ?", wsID)
+	}
+	q.Find(&rows)
+	items := make([]Subscription, len(rows))
+	for i, r := range rows {
+		items[i] = toSubscription(r)
+	}
+	return items
+}
+
+func (s *DBStore) GetSubscription(id string) (Subscription, error) {
+	var r subscriptionRow
+	if err := s.db.First(&r, "id = ?", id).Error; err != nil {
+		if isNotFound(err) {
+			return Subscription{}, ErrNotFound
+		}
+		return Subscription{}, err
+	}
+	return toSubscription(r), nil
+}
+
+func (s *DBStore) CreateSubscription(sub Subscription) Subscription {
+	if sub.ID == "" {
+		sub.ID = GenID("sub")
+	}
+	if sub.Status == "" {
+		sub.Status = "active"
+	}
+	row := subscriptionRow{
+		ID:          sub.ID,
+		WorkspaceID: sub.WorkspaceID,
+		OwnerID:     sub.OwnerID,
+		Contact:     sub.Contact,
+		Topic:       sub.Topic,
+		Status:      sub.Status,
+		CreatedAt:   time.Now(),
+	}
+	s.db.Create(&row)
+	out, _ := s.GetSubscription(sub.ID)
+	return out
+}
+
+func (s *DBStore) DeleteSubscription(id string) error {
+	return s.db.Delete(&subscriptionRow{}, "id = ?", id).Error
+}
+
+// ---------------------------------------------------------------------------
+// API Keys
+// ---------------------------------------------------------------------------
+
+func toAPIKey(r apiKeyRow) APIKey {
+	return APIKey{
+		ID:          r.ID,
+		WorkspaceID: r.WorkspaceID,
+		IssuerID:    r.IssuerID,
+		Subject:     r.Subject,
+		Key:         r.Key,
+		Type:        r.Type,
+		ExpiresAt:   r.ExpiresAt,
+		CreatedAt:   r.CreatedAt,
+	}
+}
+
+func (s *DBStore) CreateAPIKey(k APIKey) APIKey {
+	if k.ID == "" {
+		k.ID = GenID("key")
+	}
+	row := apiKeyRow{
+		ID:          k.ID,
+		WorkspaceID: k.WorkspaceID,
+		IssuerID:    k.IssuerID,
+		Subject:     k.Subject,
+		Key:         k.Key,
+		Type:        k.Type,
+		ExpiresAt:   k.ExpiresAt,
+		CreatedAt:   time.Now(),
+	}
+	s.db.Create(&row)
+	out, _ := s.GetAPIKey(k.ID)
+	return out
+}
+
+func (s *DBStore) GetAPIKey(id string) (APIKey, error) {
+	var r apiKeyRow
+	if err := s.db.First(&r, "id = ?", id).Error; err != nil {
+		if isNotFound(err) {
+			return APIKey{}, ErrNotFound
+		}
+		return APIKey{}, err
+	}
+	return toAPIKey(r), nil
+}
+
+func (s *DBStore) DeleteAPIKey(id string) error {
+	return s.db.Delete(&apiKeyRow{}, "id = ?", id).Error
+}

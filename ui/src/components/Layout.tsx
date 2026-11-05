@@ -13,6 +13,7 @@ import {
   Database,
   Settings2,
   Sliders,
+  FileKey,
   Users,
   Key,
   Server,
@@ -91,6 +92,7 @@ export const Layout: React.FC<LayoutProps> = ({ currentTab, setCurrentTab, child
         { id: 'gateways', label: t.gateways, icon: Server },
         { id: 'channels', label: t.channels, icon: Radio },
         { id: 'groups', label: t.groups, icon: FolderGit2 },
+        { id: 'certs', label: '设备证书 (mTLS)', icon: FileKey },
       ],
     },
     {

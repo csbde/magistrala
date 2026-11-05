@@ -1,3 +1,4 @@
+import { CertsModule } from './pages/CertsModule'
 import { SettingsModule } from './pages/SettingsModule'
 import React, { useState, useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -59,6 +60,7 @@ export const AppContent: React.FC = () => {
     <Layout currentTab={currentTab} setCurrentTab={setCurrentTab}>
       {currentTab === 'dashboard' && <DashboardsModule onNavigate={setCurrentTab} />}
       {currentTab === 'devices' && <DevicesModule />}
+      {currentTab === 'certs' && <CertsModule />}
       {currentTab === 'gateways' && <GatewaysModule />}
       {currentTab === 'channels' && <ChannelsModule />}
       {currentTab === 'alarms' && <AlarmsModule />}

@@ -325,6 +325,47 @@ type patRow struct {
 
 func (patRow) TableName() string { return "mg_pats" }
 
+type certificateRow struct {
+	ID           string    `gorm:"primaryKey;size:64"`
+	WorkspaceID  string    `gorm:"index;size:64;not null"`
+	EntityID     string    `gorm:"index;size:64;not null"`
+	SerialNumber string    `gorm:"size:128;index"`
+	Certificate  string    `gorm:"type:text"`
+	Key          string    `gorm:"type:text"`
+	ExpiryTime   time.Time `gorm:"index"`
+	Revoked      bool      `gorm:"default:false"`
+	RevokedAt    *time.Time
+	Subject      string    `gorm:"size:255"`
+	CreatedAt    time.Time
+}
+
+func (certificateRow) TableName() string { return "mg_certificates" }
+
+type subscriptionRow struct {
+	ID          string    `gorm:"primaryKey;size:64"`
+	WorkspaceID string    `gorm:"index;size:64;not null"`
+	OwnerID     string    `gorm:"index;size:64;not null"`
+	Contact     string    `gorm:"size:255;not null"`
+	Topic       string    `gorm:"size:255;not null"`
+	Status      string    `gorm:"size:32;default:active"`
+	CreatedAt   time.Time
+}
+
+func (subscriptionRow) TableName() string { return "mg_subscriptions" }
+
+type apiKeyRow struct {
+	ID          string     `gorm:"primaryKey;size:64"`
+	WorkspaceID string     `gorm:"index;size:64"`
+	IssuerID    string     `gorm:"index;size:64;not null"`
+	Subject     string     `gorm:"size:255;not null"`
+	Key         string     `gorm:"size:255;uniqueIndex;not null"`
+	Type        int        `gorm:"default:0"`
+	ExpiresAt   *time.Time
+	CreatedAt   time.Time
+}
+
+func (apiKeyRow) TableName() string { return "mg_api_keys" }
+
 type systemSettingRow struct {
 	Key       string    `gorm:"primaryKey;size:128"`
 	Value     string    `gorm:"type:text"`
@@ -387,7 +428,7 @@ func newStore(db *gorm.DB) (*DBStore, error) {
 		&bootstrapProfileRow{}, &bootstrapConfigRow{},
 		&deviceTypeRow{}, &deviceTypeVersionRow{}, &reportRow{}, &dashboardRow{},
 		&customNodeRow{}, &messageRow{}, &journalRow{}, &invitationRow{},
-		&patRow{}, &supportTicketRow{}, &systemSettingRow{},
+		&patRow{}, &supportTicketRow{}, &systemSettingRow{}, &certificateRow{}, &subscriptionRow{}, &apiKeyRow{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to run AutoMigrate: %w", err)
 	}
