@@ -184,6 +184,16 @@ func (s *Server) setupRoutes() {
 				scoped.Delete("/channels/{id}", s.handleDeleteChannel)
 				scoped.Get("/channels/{id}/devices", s.handleListChannelDevices)
 
+				// Channel Roles & Members
+				scoped.Get("/channels/{id}/roles", s.handleListChannelRoles)
+				scoped.Post("/channels/{id}/roles", s.handleCreateChannelRole)
+				scoped.Get("/channels/{id}/members", s.handleListChannelMembers)
+				scoped.Delete("/channels/{id}/members/{memberID}", s.handleUnassignChannelMember)
+				scoped.Put("/roles/{roleID}", s.handleUpdateChannelRole)
+				scoped.Delete("/roles/{roleID}", s.handleDeleteChannelRole)
+				scoped.Post("/roles/{roleID}/members", s.handleAddChannelRoleMember)
+				scoped.Delete("/roles/{roleID}/members/{memberID}", s.handleRemoveChannelRoleMember)
+
 				// Messages & Live Console
 				scoped.Get("/messages", s.handleListAllMessages)
 				scoped.Get("/channels/{id}/messages", s.handleListMessages)

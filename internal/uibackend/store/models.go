@@ -68,9 +68,33 @@ type Channel struct {
 	Name        string         `json:"name"`
 	WorkspaceID string         `json:"workspace_id"`
 	Status      string         `json:"status"`
+	Tags        []string       `json:"tags,omitempty"`
 	Metadata    map[string]any `json:"metadata"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+// ChannelRole 是通道级别的角色定义，一组可执行动作加上分配到的成员。
+type ChannelRole struct {
+	ID          string    `json:"id"`
+	ChannelID   string    `json:"channel_id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Name        string    `json:"name"`
+	Actions     []string  `json:"actions"`
+	Members     []string  `json:"members"`
+	CreatedBy   string    `json:"created_by,omitempty"`
+	UpdatedBy   string    `json:"updated_by,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ChannelMember 是通道成员的视图对象（角色与用户展开后的结果）。
+type ChannelMember struct {
+	UserID   string `json:"user_id"`
+	Email    string `json:"email,omitempty"`
+	Name     string `json:"name,omitempty"`
+	RoleID   string `json:"role_id"`
+	RoleName string `json:"role_name"`
 }
 
 type Connection struct {
@@ -359,6 +383,16 @@ type Storage interface {
 	GetChannel(id string) (Channel, error)
 	SaveChannel(c Channel) Channel
 	DeleteChannel(id string)
+
+	// Channel Roles & Members
+	ListChannelRoles(channelID string) []ChannelRole
+	GetChannelRole(id string) (ChannelRole, error)
+	SaveChannelRole(r ChannelRole) ChannelRole
+	UpdateChannelRole(r ChannelRole) (ChannelRole, error)
+	DeleteChannelRole(id string) error
+	ListChannelRoleMembers(roleID string) []string
+	AddChannelRoleMember(roleID, memberID string) error
+	RemoveChannelRoleMember(roleID, memberID string) error
 
 	// Connections
 	ConnectChannel(deviceID, channelID, wsID string) error

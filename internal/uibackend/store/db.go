@@ -50,16 +50,32 @@ type deviceRow struct {
 func (deviceRow) TableName() string { return "mg_devices" }
 
 type channelRow struct {
-	ID          string    `gorm:"primaryKey;size:64"`
-	Name        string    `gorm:"size:255;not null"`
-	WorkspaceID string    `gorm:"index;size:64;not null"`
-	Status      string    `gorm:"size:32;default:'enabled'"`
-	Metadata    JSONMap   `gorm:"type:text"`
+	ID          string     `gorm:"primaryKey;size:64"`
+	Name        string     `gorm:"size:255;not null"`
+	WorkspaceID string     `gorm:"index;size:64;not null"`
+	Status      string     `gorm:"size:32;default:'enabled'"`
+	Tags        StringList `gorm:"type:text"`
+	Metadata    JSONMap    `gorm:"type:text"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
 
 func (channelRow) TableName() string { return "mg_channels" }
+
+type channelRoleRow struct {
+	ID          string     `gorm:"primaryKey;size:64"`
+	ChannelID   string     `gorm:"index;size:64;not null"`
+	WorkspaceID string     `gorm:"index;size:64;not null"`
+	Name        string     `gorm:"size:255;not null"`
+	Actions     StringList `gorm:"type:text"`
+	Members     StringList `gorm:"type:text"`
+	CreatedBy   string     `gorm:"size:64"`
+	UpdatedBy   string     `gorm:"size:64"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (channelRoleRow) TableName() string { return "mg_channel_roles" }
 
 type connectionRow struct {
 	ID          uint      `gorm:"primaryKey;autoIncrement"`
@@ -429,6 +445,7 @@ func newStore(db *gorm.DB) (*DBStore, error) {
 		&deviceTypeRow{}, &deviceTypeVersionRow{}, &reportRow{}, &dashboardRow{},
 		&customNodeRow{}, &messageRow{}, &journalRow{}, &invitationRow{},
 		&patRow{}, &supportTicketRow{}, &systemSettingRow{}, &certificateRow{}, &subscriptionRow{}, &apiKeyRow{},
+		&channelRoleRow{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to run AutoMigrate: %w", err)
 	}

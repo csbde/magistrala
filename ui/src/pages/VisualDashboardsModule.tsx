@@ -8,6 +8,7 @@ import { useToast } from '../components/ui/Toast'
 import {
   Activity,
   BarChart3,
+  Database,
   Download,
   Gauge as GaugeIcon,
   LayoutGrid,
@@ -17,6 +18,7 @@ import {
   Pencil,
   Plus,
   Power,
+  Settings2,
   Share2,
   Globe,
   Sparkles,
@@ -37,6 +39,8 @@ export interface WidgetConfig {
   title: string
   /** 数据源：具体设备/通道 id，或按 tag 匹配（模板用） */
   deviceId?: string
+  deviceName?: string
+  channelId?: string
   channelName?: string
   metric?: string
   unit?: string
@@ -65,11 +69,56 @@ const KIND_META: Record<WidgetKind, { label: string; icon: React.ComponentType<{
   switch: { label: '控制开关', icon: Power, hint: '向设备下发开/关控制命令' },
 }
 
+const METRIC_PRESETS = [
+  { key: 'temperature', label: '温度', unit: '°C' },
+  { key: 'humidity', label: '湿度', unit: '%' },
+  { key: 'voltage', label: '电压', unit: 'V' },
+  { key: 'current', label: '电流', unit: 'A' },
+  { key: 'power', label: '功率', unit: 'kW' },
+  { key: 'pressure', label: '气压', unit: 'kPa' },
+  { key: 'speed', label: '转速', unit: 'rpm' },
+  { key: 'co2', label: 'CO₂', unit: 'ppm' },
+]
+
+const UNIT_PRESETS = ['°C', '%', 'V', 'A', 'W', 'kW', 'kPa', 'rpm', 'ppm', 'Hz']
+
 const isTemplate = (d: Dashboard) => (d.metadata?.kind === 'template' || d.metadata?.is_template === true) === true
 
+const LEGACY_KIND_MAP: Record<string, WidgetKind> = {
+  counter: 'count',
+  count: 'count',
+  chart: 'line',
+  line: 'line',
+  gauge: 'gauge',
+  value: 'value',
+  alarms: 'alarms',
+  alarm: 'alarms',
+  switch: 'switch',
+  control: 'switch',
+}
+
+/** 归一化布局：兼容早期示例中 type/value 形式的旧组件定义 */
 const layoutOf = (d: Dashboard): WidgetConfig[] => {
-  const raw = (d.layout?.widgets ?? []) as WidgetConfig[]
-  return Array.isArray(raw) ? raw : []
+  const raw = (d.layout?.widgets ?? []) as any[]
+  if (!Array.isArray(raw)) return []
+  return raw.map((w, idx) => {
+    if (w.kind && KIND_META[w.kind as WidgetKind]) return w as WidgetConfig
+    const kind = LEGACY_KIND_MAP[String(w.type || '').toLowerCase()] || 'value'
+    return {
+      id: w.id || `w-legacy-${idx}`,
+      kind,
+      title: w.title || '未命名组件',
+      metric: w.metric,
+      unit: kind === 'gauge' && typeof w.value === 'string' ? w.value.replace(/[-\d.]+/g, '') || undefined : w.unit,
+      deviceId: w.deviceId,
+      channelId: w.channelId,
+      matchTag: w.matchTag,
+      span: w.span ?? 1,
+      min: w.min,
+      max: w.max,
+      warnAbove: w.warnAbove,
+    } as WidgetConfig
+  })
 }
 
 /* ------------------------------- SVG 渲染组件 ----------------------------- */
@@ -180,40 +229,176 @@ const SemiGauge: React.FC<{ value: number; min?: number; max?: number; unit?: st
   )
 }
 
+/* --------------------------- 指标解析与绑定匹配 --------------------------- */
+
+const toNumber = (v: any): number | null => {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v)
+  return null
+}
+
+/**
+ * 从消息中取出目标指标数值。
+ * 依次尝试：结构化 name/value 字段 -> SenML 数组载荷 -> 普通 JSON 对象载荷。
+ */
+const metricFromMessage = (m: MessageRecord, metric?: string): number | null => {
+  const hit = (name?: string) => {
+    if (!metric) return true
+    const n = name || ''
+    return n === metric || n.includes(metric)
+  }
+
+  if (hit(m.name) || (!metric && m.name)) {
+    const v = toNumber(m.value)
+    if (v !== null) return v
+  }
+  if (!metric && (m.subtopic === undefined || m.subtopic === '')) {
+    const v = toNumber(m.value)
+    if (v !== null) return v
+  }
+
+  const payload = (m.payload || '').trim()
+  if (payload.startsWith('[')) {
+    try {
+      const recs: any[] = JSON.parse(payload)
+      for (const r of recs) {
+        if (hit(r?.n)) {
+          const v = toNumber(r?.v)
+          if (v !== null) return v
+        }
+      }
+    } catch {
+      /* 忽略非法 JSON */
+    }
+  } else if (payload.startsWith('{')) {
+    try {
+      const obj = JSON.parse(payload)
+      if (metric && Object.prototype.hasOwnProperty.call(obj, metric)) {
+        const v = toNumber(obj[metric])
+        if (v !== null) return v
+      }
+      for (const k of Object.keys(obj)) {
+        if (hit(k)) {
+          const v = toNumber(obj[k])
+          if (v !== null) return v
+        }
+      }
+    } catch {
+      /* 忽略非法 JSON */
+    }
+  }
+
+  // 最后兜底：subtopic 命中指标名时直接使用 value 字段
+  if (metric && (m.subtopic || '').includes(metric)) {
+    return toNumber(m.value)
+  }
+  return null
+}
+
+interface BindingFilter {
+  metric?: string
+  deviceIds?: string[]
+  channelId?: string
+}
+
+/** 判断某条上报消息是否命中组件的数据绑定条件 */
+const messageMatchesBinding = (m: MessageRecord, f: BindingFilter): boolean => {
+  if (f.deviceIds && f.deviceIds.length > 0 && !f.deviceIds.includes(m.publisher)) return false
+  if (f.channelId && m.channel_id !== f.channelId) return false
+  return metricFromMessage(m, f.metric) !== null
+}
+
+/* ---------------------------- 数据绑定辅助展示 ---------------------------- */
+
+const bindingSummary = (w: WidgetConfig, devices: Device[], channels: Channel[]) => {
+  if (w.kind === 'count') return '数据源: 当前工作空间实体统计'
+  if (w.kind === 'alarms') return '数据源: 当前工作空间告警流'
+
+  const parts: string[] = []
+  if (w.matchTag) {
+    const hit = devices.filter((d) => (d.tags || []).some((tg) => tg === w.matchTag || tg.includes(w.matchTag as string)))
+    parts.push(`标签 #${w.matchTag} → ${hit.length} 台设备`)
+  }
+  if (w.deviceId) {
+    const dev = devices.find((d) => d.id === w.deviceId)
+    parts.push(`设备 ${dev?.name || w.deviceId}`)
+  }
+  if (w.channelId) {
+    const ch = channels.find((c) => c.id === w.channelId)
+    parts.push(`通道 ${ch?.name || w.channelId}`)
+  }
+  if (w.metric) parts.push(`指标 ${w.metric}`)
+  return parts.length ? '绑定: ' + parts.join(' · ') : '未绑定数据源（点击「配置数据绑定」）'
+}
+
+const NoDataHint: React.FC<{ w: WidgetConfig }> = ({ w }) => (
+  <div className="h-32 flex flex-col items-center justify-center gap-1.5 text-center px-4">
+    <Database className="w-5 h-5 text-slate-300" />
+    <div className="text-xs text-slate-400">当前绑定条件未匹配到任何上报数据</div>
+    <div className="text-[11px] text-slate-400 font-mono">{bindingSummary(w, [], [])}</div>
+  </div>
+)
+
 /* ------------------------------- 单个 Widget 呈现 ----------------------------- */
 
 interface WidgetCardProps {
   w: WidgetConfig
   isEditing: boolean
   onDelete?: () => void
+  onEdit?: () => void
   devices: Device[]
   channels: Channel[]
   alarms: Alarm[]
   recentMessages: MessageRecord[]
 }
 
-const WidgetCard: React.FC<WidgetCardProps> = ({ w, isEditing, onDelete, devices, channels, alarms, recentMessages }) => {
+const WidgetCard: React.FC<WidgetCardProps> = ({ w, isEditing, onDelete, onEdit, devices, channels, alarms, recentMessages }) => {
   const { success, error } = useToast()
   const [switchState, setSwitchState] = useState(false)
   const [switching, setSwitching] = useState(false)
 
-  // 提取时序或最新值
+  // 数据绑定解析：标签匹配 -> 命中设备集合
+  const boundDeviceIds = useMemo(() => {
+    const ids: string[] = []
+    if (w.deviceId) ids.push(w.deviceId)
+    if (w.matchTag) {
+      devices
+        .filter((d) => (d.tags || []).some((tg) => tg === w.matchTag || tg.includes(w.matchTag as string)))
+        .forEach((d) => ids.push(d.id))
+    }
+    return ids
+  }, [w.deviceId, w.matchTag, devices])
+
+  const boundChannelIds = useMemo(() => {
+    if (!w.channelId) return [] as string[]
+    return [w.channelId]
+  }, [w.channelId])
+
+  // 提取时序或最新值（按绑定的设备/通道/指标过滤真实上报数据）
   const series = useMemo(() => {
     const list = recentMessages
-      .filter((m) => (!w.metric || m.name === w.metric || m.subtopic === w.metric) && (!w.deviceId || m.publisher === w.deviceId))
-      .map((m) => Number(m.value))
-      .filter((n) => !Number.isNaN(n))
-    return list.length ? list.slice(0, 15).reverse() : [22, 23.5, 25, 24.2, 26, 25.8, 27.1, 26.5]
-  }, [recentMessages, w.metric, w.deviceId])
+      .filter((m) => messageMatchesBinding(m, { metric: w.metric, deviceIds: boundDeviceIds, channelId: boundChannelIds[0] }))
+      .map((m) => metricFromMessage(m, w.metric))
+      .filter((n): n is number => n !== null)
+    return list.length ? list.slice(0, 20).reverse() : []
+  }, [recentMessages, w.metric, boundDeviceIds, boundChannelIds])
 
-  const latestVal = series[series.length - 1] ?? 0
+  const hasData = series.length > 0
+  const sampleCount = series.length
+
+  const latestVal = hasData ? series[series.length - 1] : null
 
   const handleToggleSwitch = async () => {
     setSwitching(true)
     try {
       const next = !switchState
-      // 模拟下发指令到消息中心或对应通道
-      const targetChan = channels[0]?.id || 'chan-control'
+      // 向绑定的通道（未绑定则取首个通道）下发控制指令
+      const targetChan = w.channelId || channels[0]?.id
+      if (!targetChan) {
+        error('该控制开关尚未绑定通信通道，请先在「配置数据绑定」中指定通道')
+        setSwitching(false)
+        return
+      }
       await fetchApi('/api/channels/' + targetChan + '/messages', {
         method: 'POST',
         body: JSON.stringify({
@@ -245,13 +430,22 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ w, isEditing, onDelete, devices
   return (
     <div className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col justify-between ${spanClass} relative group`}>
       {isEditing && (
-        <button
-          onClick={onDelete}
-          title="删除该组件"
-          className="absolute top-2 right-2 p-1 text-slate-400 hover:text-red-600 rounded hover:bg-slate-100 z-10"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
+          <button
+            onClick={onEdit}
+            title="配置数据绑定"
+            className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-blue-50 border border-transparent hover:border-blue-200"
+          >
+            <Settings2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onDelete}
+            title="删除该组件"
+            className="p-1 text-slate-400 hover:text-red-600 rounded hover:bg-red-50 border border-transparent hover:border-red-200"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       )}
 
       {/* 标题栏 */}
@@ -263,7 +457,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ w, isEditing, onDelete, devices
           <div>
             <h4 className="text-sm font-semibold text-slate-800">{w.title}</h4>
             <div className="text-[11px] text-slate-400">
-              {w.matchTag ? `标签: ${w.matchTag}` : w.metric ? `指标: ${w.metric}` : KIND_META[w.kind]?.label}
+              {bindingSummary(w, devices, channels)}
             </div>
           </div>
         </div>
@@ -272,27 +466,43 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ w, isEditing, onDelete, devices
 
       {/* 组件内容区 */}
       <div className="py-2">
-        {w.kind === 'line' && <MiniLineChart points={series} unit={w.unit || ''} />}
+        {w.kind === 'line' &&
+          (hasData ? (
+            <MiniLineChart points={series} unit={w.unit || ''} />
+          ) : (
+            <NoDataHint w={w} />
+          ))}
 
-        {w.kind === 'gauge' && (
-          <SemiGauge
-            value={latestVal}
-            min={w.min ?? 0}
-            max={w.max ?? 100}
-            unit={w.unit || '%'}
-            warnAbove={w.warnAbove}
-          />
-        )}
+        {w.kind === 'gauge' &&
+          (hasData ? (
+            <SemiGauge
+              value={latestVal as number}
+              min={w.min ?? 0}
+              max={w.max ?? 100}
+              unit={w.unit || '%'}
+              warnAbove={w.warnAbove}
+            />
+          ) : (
+            <NoDataHint w={w} />
+          ))}
 
         {w.kind === 'value' && (
           <div className="flex items-baseline justify-between py-2">
             <div>
-              <span className="text-3xl font-extrabold text-slate-900 tracking-tight">{latestVal}</span>
+              <span className="text-3xl font-extrabold text-slate-900 tracking-tight">
+                {hasData ? latestVal : '--'}
+              </span>
               <span className="text-sm font-medium text-slate-500 ml-1">{w.unit || ''}</span>
             </div>
-            <div className="text-xs text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-              正常 · 实时上报
-            </div>
+            {hasData ? (
+              <div className="text-xs text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                {sampleCount} 条样本 · 实时上报
+              </div>
+            ) : (
+              <div className="text-xs text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                未匹配到数据
+              </div>
+            )}
           </div>
         )}
 
@@ -349,9 +559,33 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ w, isEditing, onDelete, devices
         )}
       </div>
 
-      <div className="text-[10px] text-slate-400 pt-2 border-t border-slate-100 flex items-center justify-between">
-        <span>更新策略: 5秒自动轮询</span>
-        <span>ID: {w.id}</span>
+      <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-mono">
+            指标: {w.metric || '全部'}
+          </span>
+          {w.deviceId && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-mono">
+              设备: {w.deviceName || w.deviceId}
+            </span>
+          )}
+          {w.channelId && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono">
+              通道: {w.channelName || w.channelId}
+            </span>
+          )}
+          {w.matchTag && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+              标签: #{w.matchTag} ({boundDeviceIds.length} 台)
+            </span>
+          )}
+          {!w.deviceId && !w.channelId && !w.matchTag && w.kind !== 'count' && w.kind !== 'alarms' && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+              未绑定数据源
+            </span>
+          )}
+        </div>
+        <span className="text-[10px] text-slate-400">5s 轮询</span>
       </div>
     </div>
   )
@@ -375,15 +609,26 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
   const [addWidgetOpen, setAddWidgetOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // 添加 Widget 表单状态
-  const [newKind, setNewKind] = useState<WidgetKind>('line')
-  const [newTitle, setNewTitle] = useState('')
-  const [newMetric, setNewMetric] = useState('temperature')
-  const [newUnit, setNewUnit] = useState('°C')
-  const [newSpan, setNewSpan] = useState<1 | 2 | 3 | 4>(2)
-  const [newMin, setNewMin] = useState(0)
-  const [newMax, setNewMax] = useState(100)
-  const [newWarnAbove] = useState(80)
+  // Widget 配置表单（新增与编辑共用）
+  const emptyForm = {
+    kind: 'line' as WidgetKind,
+    title: '',
+    metric: 'temperature',
+    unit: '°C',
+    deviceId: '',
+    channelId: '',
+    matchTag: '',
+    span: 2 as 1 | 2 | 3 | 4,
+    min: 0,
+    max: 100,
+    warnAbove: 80,
+    commandTopic: 'cmd/power',
+    commandValueOn: 'ON',
+    commandValueOff: 'OFF',
+  }
+  const [form, setForm] = useState(emptyForm)
+  const [editingWidgetId, setEditingWidgetId] = useState<string | null>(null)
+  const patchForm = (patch: Partial<typeof emptyForm>) => setForm((f) => ({ ...f, ...patch }))
 
   // 设备/通道/告警数据轮询
   const { data: devData } = useQuery({
@@ -407,12 +652,26 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
     refetchInterval: 5000,
   })
 
-  const devices = devData?.items ?? []
-  const channels = chanData?.items ?? []
-  const alarms = alarmData?.items ?? []
-  const messages = msgData?.items ?? []
+  const devices = useMemo(() => devData?.items ?? [], [devData])
+  const channels = useMemo(() => chanData?.items ?? [], [chanData])
+  const alarms = useMemo(() => alarmData?.items ?? [], [alarmData])
+  const messages = useMemo(() => msgData?.items ?? [], [msgData])
 
   const widgets = useMemo(() => layoutOf(dash), [dash])
+
+  // 绑定预览：当前表单条件能匹配到多少条真实上报
+  const previewMessageCount = useMemo(() => {
+    const tagDeviceIds = form.matchTag
+      ? devices
+          .filter((d) => (d.tags || []).some((tg) => tg === form.matchTag || tg.includes(form.matchTag)))
+          .map((d) => d.id)
+      : []
+    const deviceIds = form.deviceId ? [form.deviceId, ...tagDeviceIds] : tagDeviceIds
+
+    return messages.filter((m) =>
+      messageMatchesBinding(m, { metric: form.metric || undefined, deviceIds, channelId: form.channelId || undefined }),
+    ).length
+  }, [messages, devices, form])
 
   // 保存布局
   const saveMutation = useMutation({
@@ -457,23 +716,65 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
     setDash({ ...dash, layout: { ...dash.layout, widgets: nextWidgets } })
   }
 
-  const handleAddWidget = (e: React.FormEvent) => {
+  const openAddWidget = () => {
+    setEditingWidgetId(null)
+    setForm({ ...emptyForm })
+    setAddWidgetOpen(true)
+  }
+
+  const openEditWidget = (w: WidgetConfig) => {
+    setEditingWidgetId(w.id)
+    setForm({
+      kind: w.kind,
+      title: w.title,
+      metric: w.metric ?? 'temperature',
+      unit: w.unit ?? '',
+      deviceId: w.deviceId ?? '',
+      channelId: w.channelId ?? '',
+      matchTag: w.matchTag ?? '',
+      span: w.span ?? 2,
+      min: w.min ?? 0,
+      max: w.max ?? 100,
+      warnAbove: w.warnAbove ?? 80,
+      commandTopic: w.commandTopic ?? 'cmd/power',
+      commandValueOn: w.commandValueOn ?? 'ON',
+      commandValueOff: w.commandValueOff ?? 'OFF',
+    })
+    setAddWidgetOpen(true)
+  }
+
+  const handleSaveWidget = (e: React.FormEvent) => {
     e.preventDefault()
-    const newWidget: WidgetConfig = {
-      id: `w-${Date.now().toString(36)}`,
-      kind: newKind,
-      title: newTitle || KIND_META[newKind].label,
-      metric: newMetric,
-      unit: newUnit,
-      span: newSpan,
-      min: newMin,
-      max: newMax,
-      warnAbove: newWarnAbove,
+    const dev = devices.find((d) => d.id === form.deviceId)
+    const ch = channels.find((c) => c.id === form.channelId)
+
+    const cfg: WidgetConfig = {
+      id: editingWidgetId || `w-${Date.now().toString(36)}`,
+      kind: form.kind,
+      title: form.title || KIND_META[form.kind].label,
+      metric: form.kind === 'count' || form.kind === 'alarms' ? undefined : form.metric || undefined,
+      unit: form.unit || undefined,
+      deviceId: form.deviceId || undefined,
+      deviceName: dev?.name,
+      channelId: form.channelId || undefined,
+      channelName: ch?.name,
+      matchTag: form.matchTag || undefined,
+      span: form.span,
+      min: form.kind === 'gauge' ? form.min : undefined,
+      max: form.kind === 'gauge' ? form.max : undefined,
+      warnAbove: form.kind === 'gauge' ? form.warnAbove : undefined,
+      commandTopic: form.kind === 'switch' ? form.commandTopic : undefined,
+      commandValueOn: form.kind === 'switch' ? form.commandValueOn : undefined,
+      commandValueOff: form.kind === 'switch' ? form.commandValueOff : undefined,
     }
-    const nextWidgets = [...widgets, newWidget]
-    setDash({ ...dash, layout: { ...dash.layout, widgets: nextWidgets } })
+
+    const nextWidgets = editingWidgetId
+      ? widgets.map((w) => (w.id === editingWidgetId ? cfg : w))
+      : [...widgets, cfg]
+
+    setDash({ ...dash, layout: { ...(dash.layout || {}), widgets: nextWidgets } } as Dashboard)
     setAddWidgetOpen(false)
-    setNewTitle('')
+    setEditingWidgetId(null)
   }
 
   return (
@@ -516,7 +817,7 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
             <>
               {isEditing ? (
                 <>
-                  <Button variant="outline" size="sm" onClick={() => setAddWidgetOpen(true)}>
+                  <Button variant="outline" size="sm" onClick={openAddWidget}>
                     <Plus className="w-4 h-4 mr-1" />
                     添加组件
                   </Button>
@@ -535,7 +836,7 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
               ) : (
                 <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
                   <Pencil className="w-4 h-4 mr-1" />
-                  编辑布局
+                  编辑布局与数据绑定
                 </Button>
               )}
             </>
@@ -547,6 +848,19 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
         </div>
       </div>
 
+      {isEditing && (
+        <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900 flex items-start gap-2">
+          <Database className="w-4 h-4 shrink-0 mt-0.5" />
+          <div>
+            <div className="font-semibold">数据绑定操作提示</div>
+            <div className="text-blue-800/90 mt-0.5">
+              点击组件右上角 ⚙ 图标可打开「配置组件与数据绑定」面板：大屏看板可选择具体设备与通信通道，抽象模板可填写设备标签做批量匹配；
+              控制开关额外配置下发通道、子主题与开关载荷。修改完成后点击「保存大屏布局」写回后端。
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 组件网格布局 */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {widgets.map((w) => (
@@ -554,6 +868,7 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
             key={w.id}
             w={w}
             isEditing={isEditing}
+            onEdit={() => openEditWidget(w)}
             onDelete={() => handleDeleteWidget(w.id)}
             devices={devices}
             channels={channels}
@@ -567,9 +882,9 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
         <div className="p-12 text-center bg-white rounded-xl border border-dashed border-slate-300">
           <BarChart3 className="w-8 h-8 text-slate-400 mx-auto mb-2" />
           <div className="text-sm font-semibold text-slate-700">当前大屏尚未添加任何组件</div>
-          <div className="text-xs text-slate-400 mt-1">点击右上角「编辑布局」开始拖放或添加时序曲线、仪表盘与控制开关</div>
+          <div className="text-xs text-slate-400 mt-1">点击右上角「编辑布局与数据绑定」添加时序曲线、仪表盘与控制开关，并逐个组件绑定设备/通道/指标</div>
           {!readOnly && (
-            <Button size="sm" className="mt-4" onClick={() => { setIsEditing(true); setAddWidgetOpen(true) }}>
+            <Button size="sm" className="mt-4" onClick={() => { setIsEditing(true); openAddWidget() }}>
               <Plus className="w-4 h-4 mr-1" />
               立即添加第一个组件
             </Button>
@@ -577,27 +892,33 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
         </div>
       )}
 
-      {/* 添加 Widget 弹窗 */}
+      {/* 组件配置与数据绑定弹窗 */}
       <Dialog
         open={addWidgetOpen}
         onClose={() => setAddWidgetOpen(false)}
-        title="添加可视化组件 (Add Widget)"
-        description="选择组件类型并配置数据绑定"
+        width="max-w-2xl"
+        title={editingWidgetId ? '配置组件与数据绑定 (Widget Data Binding)' : '添加可视化组件 (Add Widget)'}
+        description={
+          isTemplate(dash)
+            ? '当前为抽象模板：推荐使用「设备标签」做抽象绑定，同一模板可复用到任意同构设备群'
+            : '当前为大屏看板：可直接绑定具体的设备与通信通道，实时拉取其上报数据'
+        }
       >
-        <form onSubmit={handleAddWidget} className="space-y-4">
+        <form onSubmit={handleSaveWidget} className="space-y-5">
+          {/* 1. 组件类型 */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">组件类型 *</label>
-            <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs font-semibold text-slate-700 mb-1">1. 组件类型 *</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {(Object.keys(KIND_META) as WidgetKind[]).map((k) => {
                 const meta = KIND_META[k]
                 const Icon = meta.icon
-                const active = newKind === k
+                const active = form.kind === k
                 return (
                   <div
                     key={k}
-                    onClick={() => setNewKind(k)}
-                    className={`p-3 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
-                      active ? 'border-blue-600 bg-blue-50/50 ring-1 ring-blue-500' : 'border-slate-200 hover:border-slate-300'
+                    onClick={() => patchForm({ kind: k })}
+                    className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2 ${
+                      active ? 'border-blue-600 bg-blue-50/60 ring-1 ring-blue-500' : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
                     <div className={`p-1.5 rounded ${active ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
@@ -605,7 +926,7 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
                     </div>
                     <div>
                       <div className="text-xs font-bold text-slate-800">{meta.label}</div>
-                      <div className="text-[10px] text-slate-400">{meta.hint}</div>
+                      <div className="text-[10px] text-slate-400 leading-tight">{meta.hint}</div>
                     </div>
                   </div>
                 )
@@ -613,52 +934,257 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({ dashboard: ini
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">组件标题 *</label>
-            <Input
-              required
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="例如：主车间实时温度监测"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">指标名 (Metric)</label>
-              <Input value={newMetric} onChange={(e) => setNewMetric(e.target.value)} placeholder="如 temperature" />
+              <label className="block text-xs font-semibold text-slate-700 mb-1">2. 组件标题 *</label>
+              <Input
+                required
+                value={form.title}
+                onChange={(e) => patchForm({ title: e.target.value })}
+                placeholder="例如：主车间实时温度监测"
+              />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">计量单位 (Unit)</label>
-              <Input value={newUnit} onChange={(e) => setNewUnit(e.target.value)} placeholder="如 °C, %, rpm" />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">网格占比 (Span)</label>
-              <Select value={newSpan} onChange={(e) => setNewSpan(Number(e.target.value) as any)}>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">3. 网格宽度 (Span)</label>
+              <Select value={form.span} onChange={(e) => patchForm({ span: Number(e.target.value) as 1 | 2 | 3 | 4 })}>
                 <option value={1}>1 列 (紧凑)</option>
                 <option value={2}>2 列 (标准半宽)</option>
                 <option value={3}>3 列 (宽屏)</option>
-                <option value={4}>4 列 (全宽整行)</option>
+                <option value={4}>4 列 (整行)</option>
               </Select>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">下限最小值</label>
-              <Input type="number" value={newMin} onChange={(e) => setNewMin(Number(e.target.value))} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">上限最大值</label>
-              <Input type="number" value={newMax} onChange={(e) => setNewMax(Number(e.target.value))} />
-            </div>
           </div>
+
+          {/* 4. 数据源绑定 */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+              <Database className="w-4 h-4 text-blue-600" />
+              <div className="text-xs font-bold text-slate-800">4. 数据源绑定 (Data Binding)</div>
+              {isTemplate(dash) && (
+                <Badge className="bg-purple-100 text-purple-700 border-purple-200 ml-auto">模板：标签优先</Badge>
+              )}
+            </div>
+
+            {(form.kind === 'count' || form.kind === 'alarms') ? (
+              <div className="p-4 text-xs text-slate-500">
+                {form.kind === 'count'
+                  ? '统计计数组件自动汇总当前工作空间的设备、网关与通道数量，无需额外绑定。'
+                  : '告警列表组件自动拉取当前工作空间的实时告警流，无需额外绑定。'}
+              </div>
+            ) : (
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">绑定设备 (Device)</label>
+                    <Select value={form.deviceId} onChange={(e) => patchForm({ deviceId: e.target.value })}>
+                      <option value="">— 不限设备（按标签或全部匹配）—</option>
+                      {devices.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name} ({d.id})
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">绑定通道 (Channel)</label>
+                    <Select value={form.channelId} onChange={(e) => patchForm({ channelId: e.target.value })}>
+                      <option value="">— 不限通道 —</option>
+                      {channels.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.id})
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    设备标签匹配 (Match Tag) — 模板复用关键
+                  </label>
+                  <Input
+                    value={form.matchTag}
+                    onChange={(e) => patchForm({ matchTag: e.target.value })}
+                    placeholder="例如：workshop-a / sensor-temp（留空则不按标签匹配）"
+                  />
+                  {form.matchTag && (
+                    <div className="text-[11px] text-purple-600 mt-1">
+                      命中标签 #{form.matchTag} 的设备:{' '}
+                      <strong>
+                        {devices.filter((d) => (d.tags || []).some((tg) => tg === form.matchTag || tg.includes(form.matchTag))).length}
+                      </strong>{' '}
+                      台
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">指标字段 (Metric Key)</label>
+                    <Input
+                      list="metric-presets"
+                      value={form.metric}
+                      onChange={(e) => patchForm({ metric: e.target.value })}
+                      placeholder="temperature / humidity / voltage ..."
+                    />
+                    <datalist id="metric-presets">
+                      {METRIC_PRESETS.map((m) => (
+                        <option key={m.key} value={m.key}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </datalist>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {METRIC_PRESETS.slice(0, 6).map((m) => (
+                        <button
+                          type="button"
+                          key={m.key}
+                          onClick={() => patchForm({ metric: m.key, unit: m.unit })}
+                          className={`text-[10px] px-1.5 py-0.5 rounded border transition ${
+                            form.metric === m.key
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">计量单位 (Unit)</label>
+                    <Input
+                      value={form.unit}
+                      onChange={(e) => patchForm({ unit: e.target.value })}
+                      placeholder="°C / % / V / A / rpm"
+                    />
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {UNIT_PRESETS.map((u) => (
+                        <button
+                          type="button"
+                          key={u}
+                          onClick={() => patchForm({ unit: u })}
+                          className={`text-[10px] px-1.5 py-0.5 rounded border transition ${
+                            form.unit === u
+                              ? 'bg-slate-800 text-white border-slate-800'
+                              : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+                          }`}
+                        >
+                          {u}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+                  <div className="font-semibold text-slate-700 mb-0.5">解析出的绑定预览</div>
+                  <div className="font-mono">{bindingSummary(
+                    {
+                      id: 'preview',
+                      kind: form.kind,
+                      title: form.title,
+                      metric: form.metric,
+                      unit: form.unit,
+                      deviceId: form.deviceId || undefined,
+                      channelId: form.channelId || undefined,
+                      matchTag: form.matchTag || undefined,
+                    },
+                    devices,
+                    channels,
+                  )}</div>
+                  <div className="mt-1">
+                    将匹配到 <strong>{previewMessageCount}</strong> 条上报消息
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 5. 控制开关专属 */}
+          {form.kind === 'switch' && (
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+                <Power className="w-4 h-4 text-emerald-600" />
+                <div className="text-xs font-bold text-slate-800">5. 下行控制命令 (Downlink Command)</div>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">控制主题 (Subtopic)</label>
+                    <Input
+                      value={form.commandTopic}
+                      onChange={(e) => patchForm({ commandTopic: e.target.value })}
+                      placeholder="cmd/power"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">开启载荷 (ON)</label>
+                    <Input
+                      value={form.commandValueOn}
+                      onChange={(e) => patchForm({ commandValueOn: e.target.value })}
+                      placeholder='{"state":"on"}'
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">关闭载荷 (OFF)</label>
+                    <Input
+                      value={form.commandValueOff}
+                      onChange={(e) => patchForm({ commandValueOff: e.target.value })}
+                      placeholder='{"state":"off"}'
+                    />
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {form.channelId
+                    ? `指令将发布到通道 ${channels.find((c) => c.id === form.channelId)?.name || form.channelId} 的 ${form.commandTopic} 主题`
+                    : '未选择通道时，将回退使用当前空间的第一个通道，建议在上方显式绑定控制通道'}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 6. 量程与阈值 */}
+          {form.kind === 'gauge' && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">量程与预警阈值</label>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <Input
+                    type="number"
+                    value={form.min}
+                    onChange={(e) => patchForm({ min: Number(e.target.value) })}
+                    placeholder="下限"
+                  />
+                  <div className="text-[10px] text-slate-400 mt-1">下限 Min</div>
+                </div>
+                <div>
+                  <Input
+                    type="number"
+                    value={form.max}
+                    onChange={(e) => patchForm({ max: Number(e.target.value) })}
+                    placeholder="上限"
+                  />
+                  <div className="text-[10px] text-slate-400 mt-1">上限 Max</div>
+                </div>
+                <div>
+                  <Input
+                    type="number"
+                    value={form.warnAbove}
+                    onChange={(e) => patchForm({ warnAbove: Number(e.target.value) })}
+                    placeholder="预警"
+                  />
+                  <div className="text-[10px] text-slate-400 mt-1">预警阈值 Warn</div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
             <Button type="button" variant="outline" onClick={() => setAddWidgetOpen(false)}>
               取消
             </Button>
-            <Button type="submit">确认添加</Button>
+            <Button type="submit">{editingWidgetId ? '保存组件配置' : '确认添加'}</Button>
           </div>
         </form>
       </Dialog>
@@ -701,7 +1227,7 @@ export const VisualDashboardsModule: React.FC = () => {
     enabled: !!currentWorkspace?.id,
   })
 
-  const dashboards = pageData?.items ?? []
+  const dashboards = useMemo(() => pageData?.items ?? [], [pageData])
 
   // 创建 Dashboard
   const createMutation = useMutation({

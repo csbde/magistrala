@@ -282,13 +282,13 @@ func (s *DBStore) UnbindGatewayDevice(gatewayID, deviceID string) error {
 func toChannel(r channelRow) Channel {
 	return Channel{
 		ID: r.ID, Name: r.Name, WorkspaceID: r.WorkspaceID, Status: r.Status,
-		Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		Tags: []string(r.Tags), Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
 }
 
 func (s *DBStore) ListChannels(f QueryFilter) Page[Channel] {
 	var rows []channelRow
-	q := s.scope(s.db.Model(&channelRow{}), f, "name", "id")
+	q := s.scope(s.db.Model(&channelRow{}), f, "name", "id", "tags")
 	var total int64
 	q.Count(&total)
 	off, lim := pageArgs(f)
@@ -317,7 +317,7 @@ func (s *DBStore) SaveChannel(c Channel) Channel {
 	}
 	row := channelRow{
 		ID: c.ID, Name: c.Name, WorkspaceID: c.WorkspaceID,
-		Status: c.Status, Metadata: JSONMap(c.Metadata),
+		Status: c.Status, Tags: StringList(c.Tags), Metadata: JSONMap(c.Metadata),
 	}
 	var existing channelRow
 	if s.db.First(&existing, "id = ?", c.ID).Error == nil {
@@ -335,6 +335,136 @@ func (s *DBStore) DeleteChannel(id string) {
 	s.db.Delete(&channelRow{}, "id = ?", id)
 	s.db.Where("channel_id = ?", id).Delete(&connectionRow{})
 	s.db.Where("entity_id = ?", id).Delete(&groupEntityRow{})
+	s.db.Where("channel_id = ?", id).Delete(&channelRoleRow{})
+}
+
+// ---------------------------------------------------------------------------
+// Channel Roles & Members
+// ---------------------------------------------------------------------------
+
+func toChannelRole(r channelRoleRow) ChannelRole {
+	return ChannelRole{
+		ID: r.ID, ChannelID: r.ChannelID, WorkspaceID: r.WorkspaceID, Name: r.Name,
+		Actions: []string(r.Actions), Members: []string(r.Members),
+		CreatedBy: r.CreatedBy, UpdatedBy: r.UpdatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func (s *DBStore) ListChannelRoles(channelID string) []ChannelRole {
+	var rows []channelRoleRow
+	s.db.Order("created_at asc").Find(&rows, "channel_id = ?", channelID)
+	items := make([]ChannelRole, len(rows))
+	for i, r := range rows {
+		items[i] = toChannelRole(r)
+	}
+	return items
+}
+
+func (s *DBStore) GetChannelRole(id string) (ChannelRole, error) {
+	var r channelRoleRow
+	if err := s.db.First(&r, "id = ?", id).Error; err != nil {
+		if isNotFound(err) {
+			return ChannelRole{}, ErrNotFound
+		}
+		return ChannelRole{}, err
+	}
+	return toChannelRole(r), nil
+}
+
+func (s *DBStore) SaveChannelRole(r ChannelRole) ChannelRole {
+	if r.ID == "" {
+		r.ID = GenID("role")
+	}
+	row := channelRoleRow{
+		ID: r.ID, ChannelID: r.ChannelID, WorkspaceID: r.WorkspaceID, Name: r.Name,
+		Actions: StringList(r.Actions), Members: StringList(r.Members),
+		CreatedBy: r.CreatedBy, UpdatedBy: r.UpdatedBy,
+	}
+	var existing channelRoleRow
+	if s.db.First(&existing, "id = ?", r.ID).Error == nil {
+		row.CreatedAt = existing.CreatedAt
+	} else {
+		row.CreatedAt = time.Now()
+	}
+	row.UpdatedAt = time.Now()
+	s.db.Save(&row)
+	out, _ := s.GetChannelRole(r.ID)
+	return out
+}
+
+func (s *DBStore) UpdateChannelRole(r ChannelRole) (ChannelRole, error) {
+	var row channelRoleRow
+	if err := s.db.First(&row, "id = ?", r.ID).Error; err != nil {
+		if isNotFound(err) {
+			return ChannelRole{}, ErrNotFound
+		}
+		return ChannelRole{}, err
+	}
+	if r.Name != "" {
+		row.Name = r.Name
+	}
+	if r.Actions != nil {
+		row.Actions = StringList(r.Actions)
+	}
+	if r.Members != nil {
+		row.Members = StringList(r.Members)
+	}
+	if r.UpdatedBy != "" {
+		row.UpdatedBy = r.UpdatedBy
+	}
+	row.UpdatedAt = time.Now()
+	s.db.Save(&row)
+	return toChannelRole(row), nil
+}
+
+func (s *DBStore) DeleteChannelRole(id string) error {
+	res := s.db.Delete(&channelRoleRow{}, "id = ?", id)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *DBStore) ListChannelRoleMembers(roleID string) []string {
+	role, err := s.GetChannelRole(roleID)
+	if err != nil {
+		return nil
+	}
+	return role.Members
+}
+
+func (s *DBStore) AddChannelRoleMember(roleID, memberID string) error {
+	role, err := s.GetChannelRole(roleID)
+	if err != nil {
+		return err
+	}
+	for _, m := range role.Members {
+		if m == memberID {
+			return nil
+		}
+	}
+	role.Members = append(role.Members, memberID)
+	_, err = s.UpdateChannelRole(role)
+	return err
+}
+
+func (s *DBStore) RemoveChannelRoleMember(roleID, memberID string) error {
+	role, err := s.GetChannelRole(roleID)
+	if err != nil {
+		return err
+	}
+	filtered := make([]string, 0, len(role.Members))
+	for _, m := range role.Members {
+		if m != memberID {
+			filtered = append(filtered, m)
+		}
+	}
+	role.Members = filtered
+	_, err = s.UpdateChannelRole(role)
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -1145,6 +1275,7 @@ func (s *DBStore) SaveMessage(m MessageRecord) MessageRecord {
 	if m.ID == "" {
 		m.ID = GenID("msg")
 	}
+	EnrichMessage(&m)
 	if m.CreatedAt.IsZero() {
 		m.CreatedAt = time.Now()
 	}

@@ -904,11 +904,14 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 	if update.Status != "" {
 		ch.Status = update.Status
 	}
+	if update.Tags != nil {
+		ch.Tags = update.Tags
+	}
 	if update.Metadata != nil {
 		ch.Metadata = update.Metadata
 	}
 	saved := s.store.SaveChannel(ch)
-	s.journal(r, saved.ID, "channel", "update", map[string]any{"name": saved.Name})
+	s.journal(r, saved.ID, "channel", "update", map[string]any{"name": saved.Name, "status": saved.Status})
 	renderJSON(w, http.StatusOK, saved)
 }
 
@@ -922,6 +925,184 @@ func (s *Server) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListChannelDevices(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	renderJSON(w, http.StatusOK, s.store.ListChannelDevices(id))
+}
+
+// ---------------------------------------------------------------------------
+// Channel Roles & Members（对应官方文档 Channel Roles / Channel Members）
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleListChannelRoles(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "id")
+	renderJSON(w, http.StatusOK, s.store.ListChannelRoles(channelID))
+}
+
+func (s *Server) handleCreateChannelRole(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "id")
+	ch, err := s.store.GetChannel(channelID)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	var body struct {
+		Name    string   `json:"name"`
+		Actions []string `json:"actions"`
+		Members []string `json:"members"`
+	}
+	if !decodeBody(w, r, &body) || strings.TrimSpace(body.Name) == "" {
+		badRequest(w, "role name is required")
+		return
+	}
+	claims := ctxUser(r)
+	creator := ""
+	if claims != nil {
+		creator = claims.UserID
+	}
+	if body.Actions == nil {
+		body.Actions = []string{"read"}
+	}
+	role := s.store.SaveChannelRole(store.ChannelRole{
+		ChannelID: ch.ID, WorkspaceID: ch.WorkspaceID, Name: body.Name,
+		Actions: body.Actions, Members: body.Members, CreatedBy: creator, UpdatedBy: creator,
+	})
+	s.journal(r, ch.ID, "channel", "role.create", map[string]any{"role_id": role.ID, "name": role.Name})
+	renderJSON(w, http.StatusCreated, role)
+}
+
+func (s *Server) handleUpdateChannelRole(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "roleID")
+	role, err := s.store.GetChannelRole(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	var body struct {
+		Name    string   `json:"name"`
+		Actions []string `json:"actions"`
+		Members []string `json:"members"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if strings.TrimSpace(body.Name) != "" {
+		role.Name = body.Name
+	}
+	if body.Actions != nil {
+		role.Actions = body.Actions
+	}
+	if body.Members != nil {
+		role.Members = body.Members
+	}
+	claims := ctxUser(r)
+	if claims != nil {
+		role.UpdatedBy = claims.UserID
+	}
+	updated, err := s.store.UpdateChannelRole(role)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	s.journal(r, updated.ChannelID, "channel", "role.update", map[string]any{"role_id": updated.ID, "actions": updated.Actions})
+	renderJSON(w, http.StatusOK, updated)
+}
+
+func (s *Server) handleDeleteChannelRole(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "roleID")
+	role, err := s.store.GetChannelRole(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	if err := s.store.DeleteChannelRole(id); err != nil {
+		notFound(w, err)
+		return
+	}
+	s.journal(r, role.ChannelID, "channel", "role.delete", map[string]any{"role_id": id, "name": role.Name})
+	renderJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleAddChannelRoleMember(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "roleID")
+	var body struct {
+		MemberIDs []string `json:"member_ids"`
+	}
+	if !decodeBody(w, r, &body) || len(body.MemberIDs) == 0 {
+		badRequest(w, "member_ids is required")
+		return
+	}
+	role, err := s.store.GetChannelRole(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	for _, m := range body.MemberIDs {
+		if err := s.store.AddChannelRoleMember(role.ID, m); err != nil {
+			serverError(w, err)
+			return
+		}
+	}
+	updated, _ := s.store.GetChannelRole(id)
+	s.journal(r, updated.ChannelID, "channel", "role.member.assign", map[string]any{"role_id": id, "count": len(body.MemberIDs)})
+	renderJSON(w, http.StatusOK, updated)
+}
+
+func (s *Server) handleRemoveChannelRoleMember(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "roleID")
+	memberID := chi.URLParam(r, "memberID")
+	role, err := s.store.GetChannelRole(id)
+	if err != nil {
+		notFound(w, err)
+		return
+	}
+	if err := s.store.RemoveChannelRoleMember(id, memberID); err != nil {
+		serverError(w, err)
+		return
+	}
+	updated, _ := s.store.GetChannelRole(id)
+	s.journal(r, role.ChannelID, "channel", "role.member.unassign", map[string]any{"role_id": id, "role_name": role.Name, "member_id": memberID})
+	renderJSON(w, http.StatusOK, updated)
+}
+
+func (s *Server) handleListChannelMembers(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "id")
+	roles := s.store.ListChannelRoles(channelID)
+	type member struct {
+		UserID   string `json:"user_id"`
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+		RoleID   string `json:"role_id"`
+		RoleName string `json:"role_name"`
+		Actions  []string `json:"actions"`
+	}
+	items := make([]member, 0)
+	for _, role := range roles {
+		for _, userID := range role.Members {
+			m := member{UserID: userID, RoleID: role.ID, RoleName: role.Name, Actions: role.Actions}
+			if u, err := s.store.GetUser(userID); err == nil {
+				m.Email = u.Email
+				m.Name = u.Name
+			}
+			items = append(items, m)
+		}
+	}
+	renderJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleUnassignChannelMember(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "id")
+	memberID := chi.URLParam(r, "memberID")
+	roles := s.store.ListChannelRoles(channelID)
+	removed := 0
+	for _, role := range roles {
+		for _, m := range role.Members {
+			if m == memberID {
+				if err := s.store.RemoveChannelRoleMember(role.ID, memberID); err == nil {
+					removed++
+				}
+			}
+		}
+	}
+	s.journal(r, channelID, "channel", "member.unassign", map[string]any{"member_id": memberID, "roles": removed})
+	renderJSON(w, http.StatusOK, map[string]any{"status": "unassigned", "roles": removed})
 }
 
 // ---------------------------------------------------------------------------
@@ -1996,7 +2177,7 @@ func (s *Server) handleCreateSupportTicket(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handlePlatformInfo(w http.ResponseWriter, r *http.Request) {
 	renderJSON(w, http.StatusOK, map[string]any{
-		"platform":       "Magistrala IoT Platform",
+		"platform":       "物联网平台 (IoT Platform)",
 		"version":        "v1.0.0-embedded",
 		"mode":           "single-binary-external-db",
 		"mqtt_broker": map[string]any{

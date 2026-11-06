@@ -45,9 +45,32 @@ export interface Channel {
   name: string
   workspace_id: string
   status: string
+  tags?: string[]
   metadata?: Record<string, any>
   created_at: string
   updated_at?: string
+}
+
+export interface ChannelRole {
+  id: string
+  channel_id: string
+  workspace_id: string
+  name: string
+  actions: string[]
+  members: string[]
+  created_by?: string
+  updated_by?: string
+  created_at: string
+  updated_at?: string
+}
+
+export interface ChannelMember {
+  user_id: string
+  email?: string
+  name?: string
+  role_id: string
+  role_name: string
+  actions?: string[]
 }
 
 export interface Connection {

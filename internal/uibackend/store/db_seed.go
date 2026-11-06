@@ -264,7 +264,7 @@ func (s *DBStore) seedDemoData() error {
 		UpdatedAt:    now,
 	})
 
-	// Dashboard
+	// Dashboard（大屏看板：组件显式绑定具体设备/通道/指标）
 	s.db.Create(&dashboardRow{
 		ID:          "dash-overview",
 		Name:        "车间主监控总览大屏",
@@ -272,15 +272,44 @@ func (s *DBStore) seedDemoData() error {
 		Description: "实时展示设备在线率、温度变化曲线与告警流转状态",
 		Layout: JSONMap{
 			"widgets": []map[string]any{
-				{"type": "counter", "title": "设备总数", "value": 3},
-				{"type": "gauge", "title": "平均温度", "value": "26.4°C"},
-				{"type": "chart", "title": "今日数据上报量", "count": 1420},
+				{"id": "w-count", "kind": "count", "title": "空间资产总览", "span": 1},
+				{"id": "w-temp-line", "kind": "line", "title": "温度实时趋势", "metric": "temperature", "unit": "°C",
+					"deviceId": d1.ID, "deviceName": d1.Name, "channelId": cTelemetry.ID, "channelName": cTelemetry.Name, "span": 2},
+				{"id": "w-volt-gauge", "kind": "gauge", "title": "电表电压区间", "metric": "voltage", "unit": "V",
+					"deviceId": d2.ID, "deviceName": d2.Name, "channelId": cTelemetry.ID, "channelName": cTelemetry.Name,
+					"min": 160, "max": 280, "warnAbove": 250, "span": 1},
+				{"id": "w-hum-value", "kind": "value", "title": "湿度最新读数", "metric": "humidity", "unit": "%",
+					"deviceId": d1.ID, "deviceName": d1.Name, "span": 1},
+				{"id": "w-alarm-table", "kind": "alarms", "title": "实时告警流", "span": 2},
+				{"id": "w-power-switch", "kind": "switch", "title": "车间电源远程控制", "channelId": cControl.ID,
+					"channelName": cControl.Name, "commandTopic": "cmd/power", "commandValueOn": "ON", "commandValueOff": "OFF", "span": 1},
 			},
 		},
+		Metadata:   JSONMap{"kind": "dashboard", "is_template": false},
 		Shareable:  true,
 		ShareToken: "share_dash_overview_public",
 		CreatedAt:  now.Add(-24 * time.Hour),
 		UpdatedAt:  now,
+	})
+
+	// Dashboard 抽象模板（组件按设备标签匹配，可复用到任意同构设备群）
+	s.db.Create(&dashboardRow{
+		ID:          "dash-tmpl-env",
+		Name:        "环境监测传感器通用模板",
+		WorkspaceID: wsID,
+		Description: "按设备标签 temperature / meter 抽象匹配数据源，新建同类设备后自动接入渲染",
+		Layout: JSONMap{
+			"widgets": []map[string]any{
+				{"id": "t-temp-line", "kind": "line", "title": "同标签设备温度趋势", "metric": "temperature", "unit": "°C",
+					"matchTag": "temperature", "span": 2},
+				{"id": "t-meter-gauge", "kind": "gauge", "title": "电表类负载率", "metric": "voltage", "unit": "V",
+					"matchTag": "meter", "min": 0, "max": 300, "warnAbove": 250, "span": 1},
+				{"id": "t-count", "kind": "count", "title": "空间资产概览", "span": 1},
+			},
+		},
+		Metadata:  JSONMap{"kind": "template", "is_template": true, "tags": []string{"sensor"}},
+		CreatedAt: now.Add(-6 * time.Hour),
+		UpdatedAt: now,
 	})
 
 	// Custom Node (WASM logic)

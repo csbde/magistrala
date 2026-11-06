@@ -432,7 +432,8 @@ run_live: check_certs docker/.env.tokens
 build_ui:
 	cd ui && npm install && npm run build
 	mkdir -p cmd/server/dist
-	cp -r ui/dist/* cmd/server/dist/
+	find cmd/server/dist/assets -type f -delete 2>/dev/null || true
+	cp -r ui/dist/. cmd/server/dist/
 
 build_server: build_ui
 	mkdir -p $(BUILD_DIR)
